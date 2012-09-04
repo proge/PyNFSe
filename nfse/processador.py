@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from nfse.pysped.xml_sped.certificado import Certificado
+from pysped.xml_sped.certificado import Certificado
 from httplib import HTTPSConnection
 import os
 from uuid import uuid4
@@ -83,7 +83,6 @@ class ProcessadorNFSe(object):
         self.versao = u'1.00'
         self.caminho = caminho
         self._destino = None
-        self._certificado = None
         self._obter_dados_do_certificado(certificado, senha)
 
     def _obter_dados_do_certificado(self, certificado, senha):
@@ -111,7 +110,6 @@ class ProcessadorNFSe(object):
             esquema = etree.XMLSchema(etree.parse('nfse.xsd'))
         finally:
             os.chdir(curdir)
-        print etree.fromstring(xml)
         esquema.assertValid(etree.fromstring(xml))
         return xml
 
@@ -199,7 +197,7 @@ class ProcessadorNFSe(object):
         return self._destino
 
 
-    def _obter_xml_da_funcao(self, funcao):
+    def _obter_xml_da_funcao(self, funcao, assinar=False):
         tmp_dir = u'/tmp/'
         tmp_file_path = tmp_dir + uuid4().hex
         tmp_file = open(tmp_file_path, 'w+')
@@ -209,14 +207,17 @@ class ProcessadorNFSe(object):
         tmp_file.seek(0)
         xml = tmp_file.read()
         tmp_file.close()
-        print xml
+
+        if assinar:
+            xml = self._certificado.assina_xml(xml)
+
         return self._validar_xml(xml)
 
 
     def enviar_lote_rps(self, lote_rps):
         '''Recepção e Processamento de Lote de RPS'''
         xml = self._obter_xml_da_funcao(
-            xsd.EnviarLoteRpsEnvio(LoteRps=lote_rps)
+            xsd.EnviarLoteRpsEnvio(LoteRps=lote_rps), True
             )
         return self._conectar_servidor(xml, 'RecepcionarLoteRps')
 
@@ -262,7 +263,7 @@ class ProcessadorNFSe(object):
     def cancelar_nfse(self, pedido):
         '''Cancelamento de NFS-e'''
         xml = self._obter_xml_da_funcao(
-            xsd.CancelarNfseEnvio(Pedido=pedido)
+            xsd.CancelarNfseEnvio(Pedido=pedido), True
             )
         return self._conectar_servidor(xml, 'CancelarNfse')
 

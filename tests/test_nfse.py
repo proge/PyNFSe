@@ -37,7 +37,20 @@ from nfse.nfse_xsd import *
 class TestProcessadorNFSe(unittest.TestCase):
 
     def setUp(self):
-        self.p = ProcessadorNFSe('certificado.pfx', 'senha')
+        # producao de Curitiba
+        #servidor = 'isscuritiba.curitiba.pr.gov.br'
+        #endereco = '/Iss.NfseWebService/nfsews.asmx'
+
+        # homologacao de algum lugar
+        servidor = '200.189.192.82'
+        endereco = '/pilotonota_webservice/nfsews.asmx'
+        
+        self.p = ProcessadorNFSe(
+            servidor,
+            endereco,
+            'certificado.pfx',
+            'senha',
+            )
 
 
     def test_enviar_lote_rps(self):

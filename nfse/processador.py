@@ -34,30 +34,6 @@ NS = 'http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd'
 NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
 NAMESPACE_DEF = 'xmlns="{}" xmlns:xsi="{}"'.format(NS, NS_SCHEMA)
 
-SIGNATURE = '''
-<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-<SignedInfo>
-<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />
-<SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1" />
-<Reference URI="">
-<Transforms>
-<Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" />
-<Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315" />
-</Transforms>
-<DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1" />
-<DigestValue></DigestValue>
-</Reference>
-</SignedInfo>
-<SignatureValue></SignatureValue>
-<KeyInfo>
-<X509Data>
-<X509Certificate></X509Certificate>
-</X509Data>
-</KeyInfo>
-</Signature>
-'''
-
-# FIXME: terminar de reproduzir assinatura acima no objeto abaixo 
 # Classe herdada por que assinatura requer um namespace específico
 class Signature(xsd.SignatureType):
     def export(self, outfile, level, namespace_='', name_='SignatureType', namespacedef_='xmlns="http://www.w3.org/2000/09/xmldsig#"'):
@@ -98,9 +74,9 @@ SIGNATURE = Signature(
     )
 
 class ProcessadorNFSe(object):
-    def __init__(self, certificado, senha, ambiente=2, caminho=''):
-        # 1 - producao, 2 - homologacao
-        self.ambiente = ambiente
+    def __init__(self, servidor, endereco, certificado, senha, caminho=''):
+        self.servidor = servidor
+        self.endereco = endereco
         self.versao = u'1.00'
         self.caminho = caminho
         self._destino = None
@@ -146,19 +122,10 @@ class ProcessadorNFSe(object):
         arq_tmp.write(self._certificado.certificado)
         arq_tmp.close()
 
-        if self.ambiente == 1:
-            # producao
-            servidor = 'isscuritiba.curitiba.pr.gov.br'
-            endereco = '/Iss.NfseWebService/nfsews.asmx'
-        else:
-            # homologacao
-            servidor = '200.189.192.82'
-            endereco = '/pilotonota_webservice/nfsews.asmx'
-
         xml = self._soap(xml, servico)
-        con = HTTPSConnection(servidor, key_file=nome_arq_chave, 
+        con = HTTPSConnection(self.servidor, key_file=nome_arq_chave, 
                               cert_file=nome_arq_certificado)  #, timeout=3)
-        con.request(u'POST', endereco, xml, {
+        con.request(u'POST', self.endereco, xml, {
             u'Content-Type': u'application/soap+xml; charset=utf-8', 
             u'Content-Length': len(xml)
             })

@@ -1,8 +1,8 @@
 PyNFSe
 ======
 
-Esse projeto foi baseado no código de Ricardo Reghin enviado ao grupo OpenERP-Brasil no dia 24 de agosto de 2012.
+This project was based on Ricardo Reghin code, sent to OpenERP-Brasil group on August 24, 2012.
 
-O PyNFSe realiza a geração do arquivo XML, validação e envio.
+The PyNFSe is responsible for XML file generation, validation and submission.
 
-A parte de assinatura é feita utilizando a classe Certificado do projeto [PySPED](https://github.com/aricaldeira/PySPED/).
+The signature is made using the Certificado class from the project [PySPED](https://github.com/aricaldeira/PySPED/).

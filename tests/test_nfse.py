@@ -92,6 +92,7 @@ class TestProcessadorNFSe(unittest.TestCase):
                              )
         codigo, titulo, conteudo = self.p.enviar_lote_rps(lote_rps)
         print codigo, '-', titulo
+        self.assertEqual(codigo, 200)
 
 
     def test_consultar_situacao_lote_rps(self):
@@ -99,7 +100,7 @@ class TestProcessadorNFSe(unittest.TestCase):
         protocolo = 1
         codigo, titulo, conteudo = self.p.consultar_situacao_lote_rps(prestador, protocolo)
         print codigo, '-', titulo
-        self.assertEqual(codigo, 403)
+        self.assertEqual(codigo, 200)
 
 
     def test_consultar_nfse_por_rps(self):
@@ -107,7 +108,7 @@ class TestProcessadorNFSe(unittest.TestCase):
         prestador = tcIdentificacaoPrestador(Cnpj='16698062000159')
         codigo, titulo, conteudo = self.p.consultar_nfse_por_rps(identificacao_rps, prestador)
         print codigo, '-', titulo
-        self.assertEqual(codigo, 403)
+        self.assertEqual(codigo, 200)
 
 
     def test_consultar_lote_rps(self):
@@ -115,7 +116,7 @@ class TestProcessadorNFSe(unittest.TestCase):
         protocolo = 1
         codigo, titulo, conteudo = self.p.consultar_lote_rps(prestador, protocolo)
         print codigo, '-', titulo
-        self.assertEqual(codigo, 403)
+        self.assertEqual(codigo, 200)
     
     
     def test_consultar_nfse(self):
@@ -138,7 +139,7 @@ class TestProcessadorNFSe(unittest.TestCase):
                                                          tomador, 
                                                          intermediario)
         print codigo, '-', titulo
-        self.assertEqual(codigo, 403)
+        self.assertEqual(codigo, 200)
 
 
     def test_cancelar_nfse(self):
@@ -150,7 +151,7 @@ class TestProcessadorNFSe(unittest.TestCase):
         
         codigo, titulo, conteudo = self.p.cancelar_nfse(pedido)
         print codigo, '-', titulo
-        self.assertEqual(codigo, 403)
+        self.assertEqual(codigo, 200)
 
 
 if __name__ == '__main__':

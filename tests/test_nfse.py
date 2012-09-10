@@ -82,7 +82,7 @@ class TestProcessadorNFSe(unittest.TestCase):
                                    ),
             Prestador=prestador
             )
-        rps = Rps=[tcRps(InfRps=inf_rps, Signature=SIGNATURE)]
+        rps = [tcRps(InfRps=inf_rps, Signature=SIGNATURE)]
 
         lote_rps = tcLoteRps(NumeroLote=1,
                              Cnpj='16698062000159',

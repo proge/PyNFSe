@@ -27,7 +27,6 @@ import os
 from uuid import uuid4
 from lxml import etree
 from nfse import nfse_xsd as xsd
-from pyxb.bundles.wssplat.raw.ds import DigestValue
 
 #NS = 'http://isscuritiba.curitiba.pr.gov.br/iss/nfse.xsd'
 NS = 'http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd'

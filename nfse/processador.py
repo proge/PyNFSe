@@ -123,7 +123,7 @@ class ProcessadorNFSe(object):
 
         xml = self._soap(xml, servico)
         con = HTTPSConnection(self.servidor, key_file=nome_arq_chave, 
-                              cert_file=nome_arq_certificado)  #, timeout=3)
+                              cert_file=nome_arq_certificado)
         con.request(u'POST', self.endereco, xml, {
             u'Content-Type': u'application/soap+xml; charset=utf-8', 
             u'Content-Length': len(xml)
@@ -146,7 +146,6 @@ class ProcessadorNFSe(object):
         os.remove(nome_arq_certificado)
         con.close()
         return (resposta.status, resposta.reason, resp_xml)
-
 
     def _soap(self, xml, servico):
         return '''<?xml version="1.0" encoding="utf-8"?>
@@ -183,7 +182,6 @@ class ProcessadorNFSe(object):
 
         return self._destino
 
-
     def _obter_xml_da_funcao(self, funcao, assinar=False):
         tmp_dir = u'/tmp/'
         tmp_file_path = tmp_dir + uuid4().hex
@@ -200,14 +198,12 @@ class ProcessadorNFSe(object):
 
         return self._validar_xml(xml)
 
-
     def enviar_lote_rps(self, lote_rps):
         '''Recepção e Processamento de Lote de RPS'''
         xml = self._obter_xml_da_funcao(
             xsd.EnviarLoteRpsEnvio(LoteRps=lote_rps), True
             )
         return self._conectar_servidor(xml, 'RecepcionarLoteRps')
-
 
     def consultar_situacao_lote_rps(self, prestador, protocolo):
         '''Consulta de Situação de Lote de RPS'''
@@ -217,7 +213,6 @@ class ProcessadorNFSe(object):
             )
         return self._conectar_servidor(xml, 'ConsultarSituacaoLoteRps')
 
-
     def consultar_nfse_por_rps(self, identificacao_rps, prestador):
         '''Consulta de NFS-e por RPS'''
         xml = self._obter_xml_da_funcao(
@@ -226,14 +221,12 @@ class ProcessadorNFSe(object):
             )
         return self._conectar_servidor(xml, 'ConsultarNfsePorRps')
 
-
     def consultar_lote_rps(self, prestador, protocolo):
         '''Consulta de Lote de RPS'''
         xml = self._obter_xml_da_funcao(
             xsd.ConsultarLoteRpsEnvio(Prestador=prestador, Protocolo=protocolo)
             )
         return self._conectar_servidor(xml, 'ConsultarLoteRps')
-
 
     def consultar_nfse(self, prestador, numero_nfse, periodo_emissao, tomador, intermediario_servico):
         '''Consulta de NFS-e'''
@@ -246,11 +239,9 @@ class ProcessadorNFSe(object):
             )
         return self._conectar_servidor(xml, 'ConsultarNfse')
 
-
     def cancelar_nfse(self, pedido):
         '''Cancelamento de NFS-e'''
         xml = self._obter_xml_da_funcao(
             xsd.CancelarNfseEnvio(Pedido=pedido), True
             )
         return self._conectar_servidor(xml, 'CancelarNfse')
-

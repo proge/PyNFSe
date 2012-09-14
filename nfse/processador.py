@@ -21,7 +21,7 @@
 #                                                                            #
 ##############################################################################
 
-from pysped.xml_sped.certificado import Certificado
+from pysped_tools.certificado import Certificado
 from httplib import HTTPSConnection
 import os
 from uuid import uuid4

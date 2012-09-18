@@ -21,11 +21,8 @@
 #                                                                            #
 ##############################################################################
 
-PYSPED_PATH = '/home/daniel/devel/PySPED/'
-
 import sys
 sys.path.append('..')
-sys.path.append(PYSPED_PATH)
 
 import unittest
 import datetime

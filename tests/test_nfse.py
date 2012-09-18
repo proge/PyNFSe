@@ -29,9 +29,9 @@ sys.path.append(PYSPED_PATH)
 
 import unittest
 import datetime
-from nfse.processador import ProcessadorNFSe, SIGNATURE
+from pysped_nfse.processador import ProcessadorNFSe, SIGNATURE
 
-from nfse.nfse_xsd import *
+from pysped_nfse.nfse_xsd import *
 
 
 class TestProcessadorNFSe(unittest.TestCase):

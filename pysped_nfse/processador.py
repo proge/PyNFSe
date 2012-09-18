@@ -26,7 +26,7 @@ from httplib import HTTPSConnection
 import os
 from uuid import uuid4
 from lxml import etree
-import nfse_xsd as xsd
+from . import nfse_xsd as xsd
 
 #NS = 'http://isscuritiba.curitiba.pr.gov.br/iss/nfse.xsd'
 NS = 'http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd'

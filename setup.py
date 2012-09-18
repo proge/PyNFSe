@@ -10,7 +10,6 @@ setup(
     url = "https://github.com/proge/PySPED-NFe",
     download_url = "https://nodeload.github.com/proge/PySPED-NFSe/tarball/v0.0.1",
     keywords = ["sped", "brazil", "brasil", "nfse"],
-    requires=['PySPED-Tools (>=0.0.1)'],
     install_requires=['PySPED-Tools'],
     classifiers = [
         "Programming Language :: Python",

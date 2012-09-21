@@ -102,8 +102,8 @@ class ProcessadorNFSe(object):
         xml = self._remover_encode(xml)
         curdir = os.getcwd()
         try:
-            os.chdir(os.path.split(__file__)[0])
-            esquema = etree.XMLSchema(etree.parse('nfse.xsd'))
+            xsd_path = os.path.join(os.path.dirname(__file__), 'nfse.xsd')
+            esquema = etree.XMLSchema(etree.parse(xsd_path))
         finally:
             os.chdir(curdir)
         esquema.assertValid(etree.fromstring(xml))

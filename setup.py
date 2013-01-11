@@ -2,16 +2,16 @@ from distutils.core import setup
 
 setup(
     name = "PyNFSe",
-    packages = ["pysped_nfse"],
+    packages = ['pysped_nfse', 'pysped_nfse/sp'],
     package_data = {
-        'pysped_nfse': ['*.xsd'],
+        'pysped_nfse': ['*.xsd', 'sp/*.xsd'],
         },
-    version = "0.0.1",
+    version = "0.0.2",
     description = "Library for SPED NFS-e specification",
     author = "Daniel Hartmann",
     author_email = "daniel@proge.com.br",
     url = "https://github.com/proge/PySPED-NFe",
-    download_url = "https://nodeload.github.com/proge/PySPED-NFSe/tarball/v0.0.1",
+    download_url = "https://nodeload.github.com/proge/PySPED-NFSe/tarball/v0.0.2",
     keywords = ["sped", "brazil", "brasil", "nfse"],
     install_requires=['PySPED-Tools'],
     classifiers = [

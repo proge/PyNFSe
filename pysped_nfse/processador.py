@@ -69,7 +69,7 @@ sig_info = xsd.SignedInfoType(
 SIGNATURE = Signature(
     SignedInfo=sig_info, 
     SignatureValue=Base64Binary('SignatureValueType', ''),
-    #KeyInfo=xsd.KeyInfoType(X509Data=[xsd.X509DataType(X509Certificate='')])
+    KeyInfo=xsd.KeyInfoType(X509Data=[xsd.X509DataType(X509Certificate='')])
     )
 
 class ProcessadorNFSe(object):

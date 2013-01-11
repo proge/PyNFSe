@@ -20,3 +20,19 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.     #
 #                                                                            #
 ##############################################################################
+
+from . import TiposNFe_v01
+from . import PedidoCancelamentoNFe_v01
+from . import PedidoConsultaCNPJ_v01
+from . import PedidoConsultaLote_v01
+from . import PedidoConsultaNFe_v01
+from . import PedidoConsultaNFePeriodo_v01
+from . import PedidoEnvioLoteRPS_v01
+from . import PedidoEnvioRPS_v01
+from . import PedidoInformacoesLote_v01
+from . import RetornoCancelamentoNFe_v01
+from . import RetornoConsulta_v01
+from . import RetornoConsultaCNPJ_v01
+from . import RetornoEnvioLoteRPS_v01
+from . import RetornoEnvioRPS_v01
+from . import RetornoInformacoesLote_v01

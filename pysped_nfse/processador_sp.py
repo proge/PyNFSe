@@ -72,6 +72,13 @@ class CabecalhoCancelamento(xsd.PedidoCancelamentoNFe_v01.CabecalhoType):
         super(CabecalhoCancelamento, self).exportAttributes(
             outfile, level, already_processed, namespace_, name_
             )
+class DetalheCancelamento(xsd.PedidoCancelamentoNFe_v01.DetalheType):
+    def exportAttributes(self, outfile, level, already_processed,
+                         namespace_='', name_='DetalheType'):
+        outfile.write(' xmlns=""')
+        super(DetalheCancelamento, self).exportAttributes(
+            outfile, level, already_processed, namespace_, name_
+            )
 class CabecalhoConsulta(xsd.PedidoConsultaNFe_v01.CabecalhoType):
     def exportAttributes(self, outfile, level, already_processed,
                          namespace_='', name_='CabecalhoType'):
@@ -284,7 +291,12 @@ class ProcessadorNFSeSP(ProcessadorBase):
         '''
         assinatura += '%012d' % int(re.sub('[^0-9]', '', str(numero)))
 
-        return base64.b64encode(assinatura)
+        self._certificado.prepara_certificado_arquivo_pfx()
+
+        pkey = M2Crypto.RSA.load_key_string(self._certificado.chave)
+        signature = pkey.sign(hashlib.sha1(assinatura).digest(), 'sha1')
+
+        return base64.b64encode(signature)
 
     def _gerar_xml_envio(self, cabecalho, lote_rps):
         rps_obj_list = []
@@ -397,12 +409,16 @@ class ProcessadorNFSeSP(ProcessadorBase):
     def enviar_lote_rps(self, cabecalho, lote_rps):
         '''Recepção e Processamento de Lote de RPS'''
         xml = self._gerar_xml_envio(cabecalho, lote_rps)
-        return self._conectar_servidor(xml, 'EnvioLoteRPS')
+        return self._conectar_servidor(
+            xml, 'EnvioLoteRPS', xsd.RetornoEnvioLoteRPS_v01
+            )
 
     def testar_envio_lote_rps(self, cabecalho, lote_rps):
         '''Teste de Recepção e Processamento de Lote de RPS'''
         xml = self._gerar_xml_envio(cabecalho, lote_rps)
-        return self._conectar_servidor(xml, 'TesteEnvioLoteRPS')
+        return self._conectar_servidor(
+            xml, 'TesteEnvioLoteRPS', xsd.RetornoEnvioLoteRPS_v01
+            )
 
     def consultar_situacao_lote_rps(self, prestador, protocolo):
         '''Consulta de Situação de Lote de RPS'''
@@ -413,7 +429,9 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 ),
             xsd='PedidoInformacoesLote_v01'
             )
-        return self._conectar_servidor(xml, 'InformacoesLote')
+        return self._conectar_servidor(
+            xml, 'InformacoesLote', xsd.RetornoInformacoesLote_v01
+            )
 
     def consultar_nfse_por_rps(self, identificacao_rps, prestador):
         '''Consulta de NFS-e por RPS'''
@@ -453,8 +471,12 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 Detalhe=[detalhe],
                 Signature=SIGNATURE,
                 ),
-            xsd='PedidoConsultaNFe_v01')
-        return self._conectar_servidor(xml, 'ConsultaNFe')
+            True,
+            xsd='PedidoConsultaNFe_v01'
+            )
+        return self._conectar_servidor(
+            xml, 'ConsultaNFe', xsd.RetornoConsulta_v01
+            )
 
     def consultar_nfse_emitidas(self, dados, numero_pagina=1):
         '''Consulta de NFS-e emitidas'''
@@ -499,27 +521,22 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 Signature=SIGNATURE,
                 ),
             xsd='PedidoConsultaNFePeriodo_v01')
-        return self._conectar_servidor(xml, 'ConsultaNFePeriodo')
+        return self._conectar_servidor(
+            xml, 'ConsultaNFePeriodo', xsd.RetornoConsulta_v01
+            )
 
     def cancelar_nfse(self, dados):
         '''Cancelamento de NFS-e'''
 
-        inscr_mun_tomador = int(dados.get('InscricaoTomador'))
         inscr_mun_prestador = int(dados.get('InscricaoPrestador'))
-        numero_rps = int(dados.get('NumeroRPS'))
         numero_nfe = int(dados.get('NumeroNFe'))
 
         cabecalho = CabecalhoCancelamento(
             Versao=dados.get('Versao'),
             CPFCNPJRemetente=tpCPFCNPJ(CNPJ=dados.get('CPFCNPJRemetente')),
             transacao=True,
-            ChaveRPS=tpChaveRPS(
-                inscr_mun_tomador,
-                dados.get('SerieRPS'),
-                numero_rps,
-                )
             )
-        detalhe = xsd.PedidoCancelamentoNFe_v01.DetalheType(
+        detalhe = DetalheCancelamento(
             ChaveNFe=tpChaveNFe(
                 InscricaoPrestador=inscr_mun_prestador,
                 NumeroNFe=numero_nfe,
@@ -534,10 +551,12 @@ class ProcessadorNFSeSP(ProcessadorBase):
         xml = self._obter_xml_da_funcao(
             xsd.PedidoCancelamentoNFe_v01.PedidoCancelamentoNFe(
                 Cabecalho=cabecalho,
-                Detalhe=detalhe,
+                Detalhe=[detalhe],
                 Signature=SIGNATURE,
                 ),
             True,
             xsd='PedidoCancelamentoNFe_v01'
             )
-        return self._conectar_servidor(xml, 'CancelamentoNFe')
+        return self._conectar_servidor(
+            xml, 'CancelamentoNFe', xsd.RetornoCancelamentoNFe_v01
+            )

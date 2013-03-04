@@ -21,26 +21,18 @@
 #                                                                            #
 ##############################################################################
 
-from pysped_tools.certificado import Certificado
-from httplib import HTTPSConnection
 import os
-from uuid import uuid4
 from lxml import etree
+from .processador_base import ProcessadorBase
 from . import sp as xsd
 from .sp.TiposNFe_v01 import *
 from .sp.PedidoEnvioLoteRPS_v01 import *
 import re
 import base64
-import unicodedata
-import string
+import M2Crypto
+import hashlib
+import datetime
 
-# NS = 'http://isscuritiba.curitiba.pr.gov.br/iss/nfse.xsd'
-NS = 'http://www.prefeitura.sp.gov.br/nfe'
-NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
-NS_XSD = 'http://www.w3.org/2001/XMLSchema'
-NAMESPACE_DEF = 'xmlns="{}" xmlns:xsi="{}" xmlns:xsd="{}"'.format(
-    NS, NS_SCHEMA, NS_XSD
-    )
 
 # Classe herdada por que assinatura requer um namespace específico
 class Signature(xsd.TiposNFe_v01.SignatureType):
@@ -87,6 +79,21 @@ class CabecalhoConsulta(xsd.PedidoConsultaNFe_v01.CabecalhoType):
         super(CabecalhoConsulta, self).exportAttributes(
             outfile, level, already_processed, namespace_, name_
             )
+class CabecalhoConsultaPeriodo(
+                               xsd.PedidoConsultaNFePeriodo_v01.CabecalhoType):
+    def exportAttributes(self, outfile, level, already_processed,
+                         namespace_='', name_='CabecalhoType'):
+        outfile.write(' xmlns=""')
+        super(CabecalhoConsultaPeriodo, self).exportAttributes(
+            outfile, level, already_processed, namespace_, name_
+            )
+class DetalheConsulta(xsd.PedidoConsultaNFe_v01.DetalheType):
+    def exportAttributes(self, outfile, level, already_processed,
+                         namespace_='', name_='DetalheType'):
+        outfile.write(' xmlns=""')
+        super(DetalheConsulta, self).exportAttributes(
+            outfile, level, already_processed, namespace_, name_
+            )
 class FixedRPS(tpRPS):
     def exportAttributes(self, outfile, level, already_processed,
                          namespace_='', name_='tpRPS'):
@@ -116,15 +123,23 @@ SIGNATURE = Signature(
         )
     )
 
-class ProcessadorNFSeSP(object):
+class ProcessadorNFSeSP(ProcessadorBase):
     def __init__(self, certificado, senha, caminho=''):
-        self.servidor = 'nfe.prefeitura.sp.gov.br'
-        # TODO: acho que o endereço deve ser alterado dependendo do tipo de requisição
-        self.endereco = '/ws/lotenfe.asmx'
-        self.versao = u'1.00'
-        self.caminho = caminho
-        self._destino = None
-        self._obter_dados_do_certificado(certificado, senha)
+        super(ProcessadorNFSeSP, self).__init__(
+            'nfe.prefeitura.sp.gov.br',
+            #'testenfe.prefeitura.sp.gov.br',
+            '/ws/lotenfe.asmx',
+            certificado,
+            senha,
+            caminho
+            )
+
+        self.NS = 'http://www.prefeitura.sp.gov.br/nfe'
+        NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
+        NS_XSD = 'http://www.w3.org/2001/XMLSchema'
+        self.namespace = 'xmlns="{}" xmlns:xsi="{}" xmlns:xsd="{}"'.format(
+            self.NS, NS_SCHEMA, NS_XSD
+            )
 
         SIGNATURE.KeyInfo = xsd.TiposNFe_v01.KeyInfoType(X509Data=
             xsd.TiposNFe_v01.X509DataType(
@@ -132,73 +147,18 @@ class ProcessadorNFSeSP(object):
                 )
             )
 
-    def _obter_dados_do_certificado(self, certificado, senha):
-        self._certificado = Certificado()
-        self._certificado.arquivo = certificado
-        self._certificado.senha = senha
-        self._certificado.prepara_certificado_arquivo_pfx()
-
-    def _remover_encode(self, xml):
-        aberturas = ('<?xml version="1.0" encoding="utf-8"?>',
-            '<?xml version="1.0" encoding="utf-8" ?>',
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<?xml version="1.0" encoding="UTF-8" ?>')
-
-        for a in aberturas:
-            xml = xml.replace(a, '')
-
-        return xml
-
-    def _validar_xml(self, xml):
+    def _validar_xml(self, xml, xsd):
         xml = self._remover_encode(xml)
         curdir = os.getcwd()
         try:
             sp_xsd_path = os.path.join(os.path.dirname(__file__), 'sp')
-            xsd_path = os.path.join(sp_xsd_path, 'PedidoEnvioLoteRPS_v01.xsd')
+            file_name = '{}.xsd'.format(xsd)
+            xsd_path = os.path.join(sp_xsd_path, file_name)
             esquema = etree.XMLSchema(etree.parse(xsd_path))
         finally:
             os.chdir(curdir)
         esquema.assertValid(etree.fromstring(xml))
         return xml
-
-    def _conectar_servidor(self, xml, servico):
-        caminho_temporario = u'/tmp/'
-        nome_arq_chave = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_chave, 'w')
-        arq_tmp.write(self._certificado.chave)
-        arq_tmp.close()
-
-        nome_arq_certificado = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_certificado, 'w')
-        arq_tmp.write(self._certificado.certificado)
-        arq_tmp.close()
-
-        xml = self._soap(xml, servico)
-        print xml
-        con = HTTPSConnection(self.servidor, key_file=nome_arq_chave,
-                              cert_file=nome_arq_certificado)
-        con.request(u'POST', self.endereco, xml, {
-            u'Content-Type': u'application/soap+xml; charset=utf-8',
-            u'Content-Length': len(xml)
-            })
-
-        if self._destino:
-            arq = open(self._destino + '-env.xml', 'w')
-            arq.write(xml.encode(u'utf-8'))
-            arq.close()
-
-        resposta = con.getresponse()
-        resp_xml = unicode(resposta.read().decode('utf-8'))
-
-        if self._destino:
-            arq = open(self._destino + '-rec.xml', 'w')
-            arq.write(resp_xml.encode(u'utf-8'))
-            arq.close()
-
-        os.remove(nome_arq_chave)
-        os.remove(nome_arq_certificado)
-        con.close()
-        return (resposta.status, resposta.reason, resp_xml)
 
     def _soap(self, xml, servico):
         return '''<?xml version="1.0" encoding="utf-8"?>
@@ -207,59 +167,23 @@ class ProcessadorNFSeSP(object):
                 xmlns:xsd="http://www.w3.org/2001/XMLSchema"
                 xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
                 <soap12:Body>
-                    <{servico}Request xmlns="http://www.prefeitura.sp.gov.br/nfe">
+                    <{servico}Request
+                        xmlns="http://www.prefeitura.sp.gov.br/nfe">
                         <VersaoSchema>1</VersaoSchema>
-                        <MensagemXML>{xml}</MensagemXML>
+                        <MensagemXML>
+                        <![CDATA[
+                        {xml}
+                        ]]>
+                        </MensagemXML>
                     </{servico}Request>
                 </soap12:Body>
             </soap12:Envelope>
             '''.format(servico=servico, xml=xml).encode(u'utf-8')
 
-    # FIXME: Verificar utilidade dos dois métodos abaixo
-    def RemoveSoap(self, xml):
-        for x in ('RecepcionarLoteRpsResponse', 'ConsultarLoteRpsResponse', 'CancelarNfseResponse'):
-            xml = xml.replace('<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><soap:Body><%s xmlns="http://www.e-governeapps2.com.br/">' % x, '')
-            xml = xml.replace('</%s></soap:Body></soap:Envelope>' % x, '')
-
-        return xml
-
-    def Destino(self, emissao=None, serie=None, rps=None, arquivo=None):
-        self._destino = None
-
-        if arquivo is not None:
-            destino = ('%s/%s/%03d-%09d' % (os.path.join(self.caminho, 'producao' if self.ambiente == 1 else 'homologacao'), emissao.strftime('%Y-%m'), serie, rps))
-
-            if not os.path.exists(destino):
-                os.makedirs(destino)
-
-            self._destino = os.path.join(destino, arquivo)
-
-        return self._destino
-
-    def _obter_xml_da_funcao(self, funcao, assinar=False):
-        tmp_dir = u'/tmp/'
-        tmp_file_path = tmp_dir + uuid4().hex
-        tmp_file = open(tmp_file_path, 'w+')
-
-        funcao.export(tmp_file, 0, namespacedef_=NAMESPACE_DEF)
-
-        tmp_file.seek(0)
-        xml = tmp_file.read()
-        tmp_file.close()
-
-        if assinar:
-            xml = self._certificado.assina_xml(xml)
-
-        return self._validar_xml(xml)
-
-    def _remove_accents(self, data):
-        return ''.join(x for x in unicodedata.normalize('NFKD', unicode(data))\
-            if x in string.ascii_letters + ' ').lower()
-
     def _gerar_assinatura(self, inscricao_municipal, serie, numero,
                           data_emissao, tipo_tributacao, status, iss_retido,
                           valor_servicos, valor_deducoes, codigo_servico,
-                          cpf_cnpj):
+                          tipo_inscricao, cpf_cnpj):
         '''Assinatura do RPS codificada em BASE64.'''
         assinatura = ''
 
@@ -268,20 +192,22 @@ class ProcessadorNFSeSP(object):
         Prestador tenha menos de 8 caracteres, o mesmo deverá ser completado
         com zeros à esquerda.
         '''
-        assinatura += str(inscricao_municipal)
+        assinatura += '%08d' % int(
+            re.sub('[^0-9]', '', str(inscricao_municipal))
+            )
 
         '''
         Série do RPS com 5 posições. Caso a Série do RPS tenha menos de 5
         caracteres, o mesmo deverá ser completado com espaços em branco à
         direita.
         '''
-        assinatura += str(serie)
+        assinatura += '%-5s' % re.sub('[^0-9]', '', str(serie))
 
         '''
         Número do RPS com 12 posições. Caso o Número do RPS tenha menos de 12
         caracteres, o mesmo deverá ser completado com zeros à esquerda.
         '''
-        assinatura += str(numero)
+        assinatura += '%012d' % int(re.sub('[^0-9]', '', str(numero)))
 
         '''Data da emissão do RPS no formato AAAAMMDD.'''
         assinatura += str(re.sub('[^0-9]', '', data_emissao))
@@ -308,24 +234,36 @@ class ProcessadorNFSeSP(object):
         '''
         Valor dos Serviços com 15 posições e sem separador de milhar e decimal.
         '''
+        # FIXME: garantir duas casas decimais
         assinatura += '%015d' % int(re.sub('[^0-9]', '', str(valor_servicos)))
 
         '''
         Valor das Deduções com 15 posições e sem separador de milhar e decimal.
         '''
+        # FIXME: garantir duas casas decimais
         assinatura += '%015d' % int(re.sub('[^0-9]', '', str(valor_deducoes)))
 
         '''Código do Serviço com 5 posições.'''
-        assinatura += str(codigo_servico)
+        assinatura += '%05d' % int(re.sub('[^0-9]', '', str(codigo_servico)))
+
+        '''Tipo de inscrição. 1 (CPF), 2 (CNPJ) e 3 (não informado).'''
+        assinatura += tipo_inscricao == 'J' and '2' or '1'
 
         '''
         CPF/CNPJ do tomador com 14 posições. Sem formatação (ponto, traço,
         barra, ....). Completar com zeros à esquerda caso seja necessário. Se o
         Indicador do CPF/CNPJ for 3 (não-informado), preencher com 14 zeros.
         '''
+        if not cpf_cnpj:
+            cpf_cnpj = 0
         assinatura += '%014d' % int(re.sub('[^0-9]', '', str(cpf_cnpj)))
 
-        return base64.b64encode(assinatura)
+        self._certificado.prepara_certificado_arquivo_pfx()
+
+        pkey = M2Crypto.RSA.load_key_string(self._certificado.chave)
+        signature = pkey.sign(hashlib.sha1(assinatura).digest(), 'sha1')
+
+        return base64.b64encode(signature)
 
     def _gerar_assinatura_cancelamento(self, inscricao_municipal, numero):
         '''Assinatura de cancelamento da NFS-e codificada em BASE64.'''
@@ -336,7 +274,9 @@ class ProcessadorNFSeSP(object):
         Prestador tenha menos de 8 caracteres, o mesmo deverá ser completado
         com zeros à esquerda.
         '''
-        assinatura += str(inscricao_municipal)
+        assinatura += '%08d' % int(
+            re.sub('[^0-9]', '', str(inscricao_municipal))
+            )
 
         '''
         Número da NF-e RPS com 12 posições. Caso o Número da NF-e tenha menos
@@ -353,8 +293,19 @@ class ProcessadorNFSeSP(object):
 
             # TODO: adicionar validação e mensagens de erro nas linhas abaixo
             cidade = int(rps.get('Cidade'))
-            inscr_mun_tomador = int(rps.get('InscricaoMunicipalTomador'))
-            inscr_est_tomador = int(rps.get('InscricaoEstadualTomador'))
+
+            inscr_mun_tomador = rps.get('InscricaoMunicipalTomador')
+            if inscr_mun_tomador:
+                inscr_mun_tomador = int(inscr_mun_tomador)
+
+            inscr_est_tomador = rps.get('InscricaoEstadualTomador')
+            if inscr_est_tomador:
+                inscr_est_tomador = int(inscr_est_tomador)
+
+            inscr_mun_prestador = cabecalho.get('InscricaoMunicipalPrestador')
+            if inscr_mun_prestador:
+                inscr_mun_prestador = int(inscr_mun_prestador)
+
             numero_rps = int(rps.get('NumeroRPS'))
 
             endereco = tpEndereco(
@@ -368,22 +319,28 @@ class ProcessadorNFSeSP(object):
                 CEP=rps.get('EnderecoTomador'),
                 )
 
+            valor_servicos = rps.get('ValorServicos')
+            if valor_servicos == 0.0:
+                valor_servicos = 0
+
+            assinatura = self._gerar_assinatura(
+                inscricao_municipal=inscr_mun_prestador,
+                serie=rps.get('SerieRPS'),
+                numero=numero_rps,
+                data_emissao=rps.get('DataEmissao'),
+                tipo_tributacao=rps.get('TributacaoRPS'),
+                status=rps.get('StatusRPS'),
+                iss_retido=rps.get('ISSRetido') and 'S' or 'N',
+                valor_servicos=rps.get('ValorServicos'),
+                valor_deducoes=rps.get('ValorDeducoes'),
+                codigo_servico=rps.get('CodigoServico'),
+                tipo_inscricao=rps.get('TipoInscricaoTomador'),
+                cpf_cnpj=rps.get('CPFCNPJTomador'),
+                )
             rps_obj = FixedRPS(
-                Assinatura=self._gerar_assinatura(
-                    inscricao_municipal=inscr_mun_tomador,
-                    serie=rps.get('SerieRPS'),
-                    numero=numero_rps,
-                    data_emissao=rps.get('DataEmissao'),
-                    tipo_tributacao=rps.get('TributacaoRPS'),
-                    status=rps.get('StatusRPS'),
-                    iss_retido=rps.get('ISSRetido') and 'S' or 'N',
-                    valor_servicos=rps.get('ValorServicos'),
-                    valor_deducoes=rps.get('ValorDeducoes'),
-                    codigo_servico=rps.get('CodigoServico'),
-                    cpf_cnpj=rps.get('CPFCNPJTomador')
-                    ),
+                Assinatura=assinatura,
                 ChaveRPS=tpChaveRPS(
-                    inscr_mun_tomador,
+                    inscr_mun_prestador,
                     rps.get('SerieRPS'),
                     numero_rps,
                     ),
@@ -391,7 +348,7 @@ class ProcessadorNFSeSP(object):
                 DataEmissao=rps.get('DataEmissao'),
                 StatusRPS=rps.get('StatusRPS'),
                 TributacaoRPS=rps.get('TributacaoRPS'),
-                ValorServicos=rps.get('ValorServicos'),
+                ValorServicos=valor_servicos,
                 ValorDeducoes=rps.get('ValorDeducoes'),
                 ValorPIS=rps.get('ValorPIS'),
                 ValorCOFINS=rps.get('ValorCOFINS'),
@@ -408,7 +365,7 @@ class ProcessadorNFSeSP(object):
                     rps.get('RazaoSocialTomador')
                     ),
                 EnderecoTomador=endereco,
-                EmailTomador=rps.get('EmailTomador'),
+                EmailTomador=rps.get('EmailTomador') or None,
                 Discriminacao=self._remove_accents(rps.get('Discriminacao')),
                 )
             rps_obj_list.append(rps_obj)
@@ -433,7 +390,8 @@ class ProcessadorNFSeSP(object):
                 RPS=rps_obj_list,
                 Signature=SIGNATURE
                 ),
-            True
+            True,
+            xsd='PedidoEnvioLoteRPS_v01'
             )
 
     def enviar_lote_rps(self, cabecalho, lote_rps):
@@ -452,48 +410,96 @@ class ProcessadorNFSeSP(object):
             xsd.PedidoInformacoesLote_v01.PedidoInformacoesLote(
                 Prestador=prestador,
                 Protocolo=protocolo
-                )
+                ),
+            xsd='PedidoInformacoesLote_v01'
             )
         return self._conectar_servidor(xml, 'InformacoesLote')
 
-#    def consultar_nfse_por_rps(self, identificacao_rps, prestador):
-#        '''Consulta de NFS-e por RPS'''
-#        xml = self._obter_xml_da_funcao(
-#            xsd.ConsultarNfseRpsEnvio(IdentificacaoRps=identificacao_rps,
-#                                      Prestador=prestador)
-#            )
-#        return self._conectar_servidor(xml, 'ConsultarNfsePorRps')
+    def consultar_nfse_por_rps(self, identificacao_rps, prestador):
+        '''Consulta de NFS-e por RPS'''
+        raise NotImplementedError(u'Método não implementado para SP.')
 
     def consultar_nfse(self, dados):
         '''Consulta de NFS-e'''
         inscr_mun_prestador = int(dados.get('InscricaoPrestador'))
-        numero_rps = int(dados.get('NumeroRPS'))
 
         cabecalho = CabecalhoConsulta(
             Versao=dados.get('Versao'),
             CPFCNPJRemetente=tpCPFCNPJ(CNPJ=dados.get('CPFCNPJRemetente')),
             )
 
-        detalhe = xsd.PedidoConsultaNFe_v01.DetalheType(
-            ChaveRPS=tpChaveRPS(
-                inscr_mun_prestador,
-                dados.get('SerieRPS'),
-                numero_rps,
-                ),
-            ChaveNFe=tpChaveNFe(
-                InscricaoPrestador=inscr_mun_prestador,
-                NumeroNFe=dados.get('NumeroNFe'),
-                CodigoVerificacao=dados.get('CodigoVerificacao'),
-                ),
-            )
+        # Usar ChaveRPS or ChaveNFe, nunca ambos
+        if dados.get('SerieRPS'):
+            numero_rps = int(dados.get('NumeroRPS'))
+            detalhe = DetalheConsulta(
+                ChaveRPS=tpChaveRPS(
+                    inscr_mun_prestador,
+                    dados.get('SerieRPS'),
+                    numero_rps,
+                    )
+                )
+        else:
+            detalhe = DetalheConsulta(
+                ChaveNFe=tpChaveNFe(
+                    InscricaoPrestador=inscr_mun_prestador,
+                    NumeroNFe=dados.get('NumeroNFe'),
+                    CodigoVerificacao=dados.get('CodigoVerificacao'),
+                    )
+                )
 
         xml = self._obter_xml_da_funcao(
             xsd.PedidoConsultaNFe_v01.PedidoConsultaNFe(
                 Cabecalho=cabecalho,
-                Detalhe=detalhe,
+                Detalhe=[detalhe],
                 Signature=SIGNATURE,
-                ))
+                ),
+            xsd='PedidoConsultaNFe_v01')
         return self._conectar_servidor(xml, 'ConsultaNFe')
+
+    def consultar_nfse_emitidas(self, dados, numero_pagina=1):
+        '''Consulta de NFS-e emitidas'''
+        inscr_mun_prestador = int(dados.get('InscricaoPrestador'))
+
+        data_inicio = dados.get('DataInicio')
+        data_fim = dados.get('DataFim')
+
+        if not data_inicio:
+            '''
+            Se não for informada data de início, obtém o início do ano da data
+            de fim. Se não for informada data de início nem de fim, obtém o
+            início do ano atual.
+            '''
+            if data_fim:
+                data_fim_obj = datetime.datetime.strptime(data_fim, '%Y-%m-%d')
+                ano_atual = int(data_fim_obj.strftime('%Y'))
+            else:
+                ano_atual = int(datetime.datetime.today().strftime('%Y'))
+
+            data_inicio = datetime.datetime.strptime(
+                '%04d-%02d-%02d' % (ano_atual, 1, 1),
+                '%Y-%m-%d'
+                )
+
+        if not data_fim:
+            data_fim = datetime.datetime.today().strftime('%Y-%m-%d')
+
+        cabecalho = CabecalhoConsulta(
+            Versao=dados.get('Versao'),
+            CPFCNPJRemetente = tpCPFCNPJ(CNPJ=dados.get('CPFCNPJRemetente')),
+            CPFCNPJ=tpCPFCNPJ(CNPJ=dados.get('CPFCNPJTomador')),
+            Inscricao=inscr_mun_prestador,
+            dtInicio=data_inicio,
+            dtFim=data_fim,
+            NumeroPagina=numero_pagina,
+            )
+
+        xml = self._obter_xml_da_funcao(
+            xsd.PedidoConsultaNFePeriodo_v01.PedidoConsultaNFePeriodo(
+                Cabecalho=cabecalho,
+                Signature=SIGNATURE,
+                ),
+            xsd='PedidoConsultaNFePeriodo_v01')
+        return self._conectar_servidor(xml, 'ConsultaNFePeriodo')
 
     def cancelar_nfse(self, dados):
         '''Cancelamento de NFS-e'''
@@ -531,6 +537,7 @@ class ProcessadorNFSeSP(object):
                 Detalhe=detalhe,
                 Signature=SIGNATURE,
                 ),
-            True
+            True,
+            xsd='PedidoCancelamentoNFe_v01'
             )
         return self._conectar_servidor(xml, 'CancelamentoNFe')

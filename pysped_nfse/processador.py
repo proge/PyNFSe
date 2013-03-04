@@ -26,12 +26,9 @@ from httplib import HTTPSConnection
 import os
 from uuid import uuid4
 from lxml import etree
+from .processador_base import ProcessadorBase
 from . import nfse_xsd as xsd
 
-#NS = 'http://isscuritiba.curitiba.pr.gov.br/iss/nfse.xsd'
-NS = 'http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd'
-NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
-NAMESPACE_DEF = 'xmlns="{}" xmlns:xsi="{}"'.format(NS, NS_SCHEMA)
 
 # Classe herdada por que assinatura requer um namespace específico
 class Signature(xsd.SignatureType):
@@ -72,132 +69,7 @@ SIGNATURE = Signature(
     KeyInfo=xsd.KeyInfoType(X509Data=[xsd.X509DataType(X509Certificate='')])
     )
 
-class ProcessadorNFSe(object):
-    def __init__(self, servidor, endereco, certificado, senha, caminho=''):
-        self.servidor = servidor
-        self.endereco = endereco
-        self.versao = u'1.00'
-        self.caminho = caminho
-        self._destino = None
-        self._obter_dados_do_certificado(certificado, senha)
-
-    def _obter_dados_do_certificado(self, certificado, senha):
-        self._certificado = Certificado()
-        self._certificado.arquivo = certificado
-        self._certificado.senha = senha
-        self._certificado.prepara_certificado_arquivo_pfx()
-
-    def _remover_encode(self, xml):
-        aberturas = ('<?xml version="1.0" encoding="utf-8"?>',
-            '<?xml version="1.0" encoding="utf-8" ?>',
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<?xml version="1.0" encoding="UTF-8" ?>')
-
-        for a in aberturas:
-            xml = xml.replace(a, '')
-
-        return xml
-
-    def _validar_xml(self, xml):
-        xml = self._remover_encode(xml)
-        curdir = os.getcwd()
-        try:
-            xsd_path = os.path.join(os.path.dirname(__file__), 'nfse.xsd')
-            esquema = etree.XMLSchema(etree.parse(xsd_path))
-        finally:
-            os.chdir(curdir)
-        esquema.assertValid(etree.fromstring(xml))
-        return xml
-
-    def _conectar_servidor(self, xml, servico):
-        caminho_temporario = u'/tmp/'
-        nome_arq_chave = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_chave, 'w')
-        arq_tmp.write(self._certificado.chave)
-        arq_tmp.close()
-
-        nome_arq_certificado = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_certificado, 'w')
-        arq_tmp.write(self._certificado.certificado)
-        arq_tmp.close()
-
-        xml = self._soap(xml, servico)
-        con = HTTPSConnection(self.servidor, key_file=nome_arq_chave, 
-                              cert_file=nome_arq_certificado)
-        con.request(u'POST', self.endereco, xml, {
-            u'Content-Type': u'application/soap+xml; charset=utf-8', 
-            u'Content-Length': len(xml)
-            })
-
-        if self._destino:
-            arq = open(self._destino + '-env.xml', 'w')
-            arq.write(xml.encode(u'utf-8'))
-            arq.close()
-
-        resposta = con.getresponse()
-        resp_xml = unicode(resposta.read().decode('utf-8'))
-
-        if self._destino:
-            arq = open(self._destino + '-rec.xml', 'w')
-            arq.write(resp_xml.encode(u'utf-8'))
-            arq.close()
-
-        os.remove(nome_arq_chave)
-        os.remove(nome_arq_certificado)
-        con.close()
-        return (resposta.status, resposta.reason, resp_xml)
-
-    def _soap(self, xml, servico):
-        return '''<?xml version="1.0" encoding="utf-8"?>
-            <soap12:Envelope
-                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-                xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-                <soap12:Body>
-                    <{servico} xmlns="http://www.e-governeapps2.com.br/">
-                        {xml}
-                    </{servico}>
-                </soap12:Body>
-            </soap12:Envelope>
-            '''.format(servico=servico, xml=xml).encode(u'utf-8')
-
-    # FIXME: Verificar utilidade dos dois métodos abaixo
-    def RemoveSoap(self, xml):
-        for x in ('RecepcionarLoteRpsResponse', 'ConsultarLoteRpsResponse', 'CancelarNfseResponse'):
-            xml = xml.replace('<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><soap:Body><%s xmlns="http://www.e-governeapps2.com.br/">' % x, '')
-            xml = xml.replace('</%s></soap:Body></soap:Envelope>' % x, '')
-
-        return xml
-
-    def Destino(self, emissao=None, serie=None, rps=None, arquivo=None):
-        self._destino = None
-
-        if arquivo is not None:
-            destino = ('%s/%s/%03d-%09d' % (os.path.join(self.caminho, 'producao' if self.ambiente == 1 else 'homologacao'), emissao.strftime('%Y-%m'), serie, rps))
-
-            if not os.path.exists(destino):
-                os.makedirs(destino)
-
-            self._destino = os.path.join(destino, arquivo)
-
-        return self._destino
-
-    def _obter_xml_da_funcao(self, funcao, assinar=False):
-        tmp_dir = u'/tmp/'
-        tmp_file_path = tmp_dir + uuid4().hex
-        tmp_file = open(tmp_file_path, 'w+')
-
-        funcao.export(tmp_file, 0, namespacedef_=NAMESPACE_DEF)
-
-        tmp_file.seek(0)
-        xml = tmp_file.read()
-        tmp_file.close()
-
-        if assinar:
-            xml = self._certificado.assina_xml(xml)
-
-        return self._validar_xml(xml)
-
+class ProcessadorNFSe(ProcessadorBase):
     def enviar_lote_rps(self, lote_rps):
         '''Recepção e Processamento de Lote de RPS'''
         xml = self._obter_xml_da_funcao(

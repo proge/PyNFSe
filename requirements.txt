@@ -1,0 +1,45 @@
+sudo apt-get install python-dev libxml2-dev swig libxmlsec1-dev
+
+wget ftp://xmlsoft.org/libxml2/libxml2-sources-2.7.8.tar.gz
+tar xvzf libxml2-sources-2.7.8.tar.gz
+cd libxml2-2.7.8/python
+virtual_env/bin/python setup.py install
+
+
+wget http://pypi.python.org/packages/source/M/M2Crypto/M2Crypto-0.21.1.tar.gz#md5=f93d8462ff7646397a9f77a2fe602d17
+tar xvzf M2Crypto-0.21.1.tar.gz
+cd M2Crypto-0.21.1
+
+Diff:
+--- SWIG/_ssl.i 2011-01-15 20:10:06.000000000 +0100
++++ SWIG/_ssl.i 2012-06-17 17:39:05.292769292 +0200
+@@ -48,8 +48,10 @@
+ %rename(ssl_get_alert_desc_v) SSL_alert_desc_string_long;
+ extern const char *SSL_alert_desc_string_long(int);
+
++#ifndef OPENSSL_NO_SSL2
+ %rename(sslv2_method) SSLv2_method;
+ extern SSL_METHOD *SSLv2_method(void);
++#endif
+
+virtual_env/bin/python setup.py install
+
+
+wget http://labs.libre-entreprise.org/download.php/430/pyxmlsec-0.3.0.tar.gz
+tar xvzf pyxmlsec-0.3.0.tar.gz
+cd pyxmlsec-0.3.0
+
+Diff:
+--- pyxmlsec-0.3.0/setup.py     2006-01-01 15:43:37.000000000 -0200
++++ pyxmlsec-0.3.0/setup.py     2009-11-10 17:57:29.390253522 -0200
+@@ -182,7 +182,8 @@
+                define_macros = define_macros,
+                include_dirs  = include_dirs,
+                library_dirs  = library_dirs,
+-               libraries     = libraries
++               libraries     = libraries,
++               extra_compile_args = ['-DXMLSEC_NO_SIZE_T']
+                )
+
+virtual_env/bin/python setup.py install
+

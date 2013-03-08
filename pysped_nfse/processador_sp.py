@@ -241,13 +241,15 @@ class ProcessadorNFSeSP(ProcessadorBase):
         '''
         Valor dos Serviços com 15 posições e sem separador de milhar e decimal.
         '''
-        # FIXME: garantir duas casas decimais
+        if valor_servicos:
+            valor_servicos = '%.02f' % round(valor_servicos, 2)
         assinatura += '%015d' % int(re.sub('[^0-9]', '', str(valor_servicos)))
 
         '''
         Valor das Deduções com 15 posições e sem separador de milhar e decimal.
         '''
-        # FIXME: garantir duas casas decimais
+        if valor_deducoes:
+            valor_deducoes = '%.02f' % round(valor_deducoes, 2)
         assinatura += '%015d' % int(re.sub('[^0-9]', '', str(valor_deducoes)))
 
         '''Código do Serviço com 5 posições.'''

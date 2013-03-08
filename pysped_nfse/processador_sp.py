@@ -303,8 +303,10 @@ class ProcessadorNFSeSP(ProcessadorBase):
 
         for rps in lote_rps:
 
-            # TODO: adicionar validação e mensagens de erro nas linhas abaixo
-            cidade = int(rps.get('Cidade'))
+            if rps.get('Cidade'):
+                cidade = int(rps.get('Cidade'))
+            else:
+                cidade = None
 
             inscr_mun_tomador = rps.get('InscricaoMunicipalTomador')
             if inscr_mun_tomador:
@@ -318,7 +320,10 @@ class ProcessadorNFSeSP(ProcessadorBase):
             if inscr_mun_prestador:
                 inscr_mun_prestador = int(inscr_mun_prestador)
 
-            numero_rps = int(rps.get('NumeroRPS'))
+            if rps.get('NumeroRPS'):
+                numero_rps = int(rps.get('NumeroRPS'))
+            else:
+                numero_rps = None
 
             endereco = tpEndereco(
                 TipoLogradouro=rps.get('TipoLogradouro'),

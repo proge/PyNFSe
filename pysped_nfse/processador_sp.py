@@ -148,6 +148,10 @@ class ProcessadorNFSeSP(ProcessadorBase):
             self.NS, NS_SCHEMA, NS_XSD
             )
 
+        self._certificado.certificado = self._certificado.certificado.replace('-----BEGIN CERTIFICATE-----', '')
+        self._certificado.certificado = self._certificado.certificado.replace('-----END CERTIFICATE-----', '')
+        self._certificado.certificado = self._certificado.certificado.strip()
+
         SIGNATURE.KeyInfo = xsd.TiposNFe_v01.KeyInfoType(X509Data=
             xsd.TiposNFe_v01.X509DataType(
                 X509Certificate=self._certificado.certificado

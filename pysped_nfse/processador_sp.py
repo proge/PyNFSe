@@ -148,6 +148,10 @@ class ProcessadorNFSeSP(ProcessadorBase):
             self.NS, NS_SCHEMA, NS_XSD
             )
 
+        self._certificado.certificado = self._certificado.certificado.replace('-----BEGIN CERTIFICATE-----', '')
+        self._certificado.certificado = self._certificado.certificado.replace('-----END CERTIFICATE-----', '')
+        self._certificado.certificado = self._certificado.certificado.strip()
+
         SIGNATURE.KeyInfo = xsd.TiposNFe_v01.KeyInfoType(X509Data=
             xsd.TiposNFe_v01.X509DataType(
                 X509Certificate=self._certificado.certificado
@@ -356,6 +360,12 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 tipo_inscricao=rps.get('TipoInscricaoTomador'),
                 cpf_cnpj=rps.get('CPFCNPJTomador'),
                 )
+
+            if len(rps.get('CPFCNPJTomador', '')) > 11:
+                cpf_cnpj_tomador = tpCPFCNPJ(CNPJ=rps.get('CPFCNPJTomador'))
+            else:
+                cpf_cnpj_tomador = tpCPFCNPJ(CPF=rps.get('CPFCNPJTomador'))
+
             rps_obj = FixedRPS(
                 Assinatura=assinatura,
                 ChaveRPS=tpChaveRPS(
@@ -377,7 +387,7 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 CodigoServico=rps.get('CodigoServico'),
                 AliquotaServicos=rps.get('AliquotaServicos'),
                 ISSRetido=rps.get('ISSRetido'),
-                CPFCNPJTomador=tpCPFCNPJ(CNPJ=rps.get('CPFCNPJTomador')),
+                CPFCNPJTomador=cpf_cnpj_tomador,
                 InscricaoMunicipalTomador=inscr_mun_tomador,
                 InscricaoEstadualTomador=inscr_est_tomador,
                 RazaoSocialTomador=self._remove_accents(

@@ -142,3 +142,5 @@ class GeneratedsSuper(object):
         return class_obj1
     def gds_build_any(self, node, type_name=None):
         return None
+    def get(self, attr, default=None):
+        return getattr(self, attr, default)

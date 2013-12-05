@@ -2,7 +2,7 @@
 
 ##############################################################################
 #                                                                            #
-#  Copyright (C) 2012 Proge Informática Ltda (<http://www.proge.com.br>).    #
+#  Copyright (C) 2013 Proge Informática Ltda (<http://www.proge.com.br>).    #
 #                                                                            #
 #  Author Daniel Hartmann <daniel@proge.com.br>                              #
 #                                                                            #
@@ -33,16 +33,17 @@ from .exception import *
 
 
 class ProcessadorBase(object):
-    def __init__(self, servidor, endereco, certificado, senha, caminho=''):
+    def __init__(self, servidor, endereco, certificado, senha, caminho='', servidor_homologacao=''):
         self.servidor = servidor
+        self.servidor_homologacao = servidor_homologacao
         self.endereco = endereco
         self.versao = u'1.00'
         self.caminho = caminho
         self._destino = None
         self._obter_dados_do_certificado(certificado, senha)
         self.NS = 'http://www.abrasf.org.br/ABRASF/arquivos/nfse.xsd'
-        NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
-        self.namespace = 'xmlns="{}" xmlns:xsi="{}"'.format(self.NS, NS_SCHEMA)
+        self.NS_SCHEMA = 'http://www.w3.org/2001/XMLSchema-instance'
+        self.namespace = 'xmlns="{}" xmlns:xsi="{}"'.format(self.NS, self.NS_SCHEMA)
 
     def _obter_dados_do_certificado(self, certificado, senha):
         self._certificado = Certificado()
@@ -72,22 +73,8 @@ class ProcessadorBase(object):
         esquema.assertValid(etree.fromstring(xml))
         return xml
 
-    def _conectar_servidor(self, xml, servico, xsd_retorno):
-        caminho_temporario = u'/tmp/'
-        nome_arq_chave = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_chave, 'w')
-        arq_tmp.write(self._certificado.chave)
-        arq_tmp.close()
-
-        nome_arq_certificado = caminho_temporario + uuid4().hex
-        arq_tmp = open(nome_arq_certificado, 'w')
-        arq_tmp.write(self._certificado.certificado)
-        arq_tmp.close()
-
-        xml = self._soap(xml, servico)
-        con = HTTPSConnection(self.servidor, key_file=nome_arq_chave, 
-                              cert_file=nome_arq_certificado)
-        con.request(u'POST', self.endereco, xml, {
+    def _soap_post(self, connection, xml, servico=None):
+        connection.request(u'POST', self.endereco, xml, {
             u'Content-Type': u'application/soap+xml; charset=utf-8',
             u'Content-Length': len(xml),
             })
@@ -97,7 +84,8 @@ class ProcessadorBase(object):
             arq.write(xml.encode(u'utf-8'))
             arq.close()
 
-        resposta = con.getresponse()
+        resposta = connection.getresponse()
+
         if resposta.status != 200:
             raise CommunicationError(resposta.status, resposta.reason)
 
@@ -106,7 +94,10 @@ class ProcessadorBase(object):
         result_str = resp_xml.find(".//{%s}RetornoXML" % self.NS).text
         xsd_retorno.ExternalEncoding = 'utf-8'
         result = xsd_retorno.parseString(result_str.encode('utf-8'))
+        
+        return result
 
+    def _parse_result(self, result):
         nos_erro = result.Erro
         nos_alerta = result.Alerta
 
@@ -122,10 +113,11 @@ class ProcessadorBase(object):
             else:
                 chave = n.ChaveNFe
 
+            #TODO a chave esta vindo como None, estou setando para o codigo indice, desta forma nao sera possivel enviar em lote.
             try:
-                alertas[chave].append((codigo, descricao))
+                alertas[codigo].append((descricao))
             except KeyError:
-                alertas[chave] = [(codigo, descricao)]
+                alertas[codigo] = [(descricao)]
 
         erros = {}
         for n in nos_erro:
@@ -136,20 +128,43 @@ class ProcessadorBase(object):
             else:
                 chave = n.ChaveNFe
 
+            #TODO a chave esta vindo como None, estou setando para o codigo indice, desta forma nao sera possivel enviar em lote.
             try:
-                erros[chave].append((codigo, descricao))
+                erros[codigo].append((descricao))
             except KeyError:
-                erros[chave] = [(codigo, descricao)]
+                erros[codigo] = [(descricao)]
 
+        return (sucesso, erros, alertas)
+
+    def _conectar_servidor(self, xml, service, xsd_retorno, test=False):
+        server = test and self.servidor_homologacao or self.servidor
+
+        caminho_temporario = u'/tmp/'
+        key_file = caminho_temporario + uuid4().hex
+        arq_tmp = open(key_file, 'w')
+        arq_tmp.write(self._certificado.chave)
+        arq_tmp.close()
+
+        cert_file = caminho_temporario + uuid4().hex
+        arq_tmp = open(cert_file, 'w')
+        arq_tmp.write(self._certificado.certificado)
+        arq_tmp.close()
+
+        xml = self._soap(xml, service)
+
+        connection = HTTPSConnection(server, key_file=key_file, cert_file=cert_file)
+        result = self._soap_post(connection, xml, service)
+
+        sucesso, erros, alertas = self._parse_result(result)
 
         if self._destino:
             arq = open(self._destino + '-rec.xml', 'w')
             arq.write(resp_xml_str.encode(u'utf-8'))
             arq.close()
 
-        os.remove(nome_arq_chave)
-        os.remove(nome_arq_certificado)
-        con.close()
+        os.remove(key_file)
+        os.remove(cert_file)
+        connection.close()
 
         return (sucesso, result, alertas, erros)
 
@@ -180,7 +195,6 @@ class ProcessadorBase(object):
 
         if assinar:
             xml = self._certificado.assina_xml(xml)
-
         return self._validar_xml(xml, xsd)
 
     def _remove_accents(self, data):

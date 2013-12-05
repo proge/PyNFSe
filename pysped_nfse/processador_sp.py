@@ -33,7 +33,6 @@ import M2Crypto
 import hashlib
 import datetime
 
-
 # Classe herdada por que assinatura requer um namespace específico
 class Signature(xsd.TiposNFe_v01.SignatureType):
     def export(self, outfile, level, namespace_='', name_='SignatureType',
@@ -353,19 +352,13 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 data_emissao=rps.get('DataEmissao'),
                 tipo_tributacao=rps.get('TributacaoRPS'),
                 status=rps.get('StatusRPS'),
-                iss_retido=rps.get('ISSRetido') and 'S' or 'N',
+                iss_retido=rps.get('ISSRetido') == 'false' and 'N' or 'S',
                 valor_servicos=rps.get('ValorServicos'),
                 valor_deducoes=rps.get('ValorDeducoes'),
                 codigo_servico=rps.get('CodigoServico'),
                 tipo_inscricao=rps.get('TipoInscricaoTomador'),
                 cpf_cnpj=rps.get('CPFCNPJTomador'),
                 )
-
-            if len(rps.get('CPFCNPJTomador', '')) > 11:
-                cpf_cnpj_tomador = tpCPFCNPJ(CNPJ=rps.get('CPFCNPJTomador'))
-            else:
-                cpf_cnpj_tomador = tpCPFCNPJ(CPF=rps.get('CPFCNPJTomador'))
-
             rps_obj = FixedRPS(
                 Assinatura=assinatura,
                 ChaveRPS=tpChaveRPS(
@@ -377,17 +370,17 @@ class ProcessadorNFSeSP(ProcessadorBase):
                 DataEmissao=rps.get('DataEmissao'),
                 StatusRPS=rps.get('StatusRPS'),
                 TributacaoRPS=rps.get('TributacaoRPS'),
-                ValorServicos=valor_servicos,
-                ValorDeducoes=rps.get('ValorDeducoes'),
-                ValorPIS=rps.get('ValorPIS'),
-                ValorCOFINS=rps.get('ValorCOFINS'),
-                ValorINSS=rps.get('ValorINSS'),
-                ValorIR=rps.get('ValorIR'),
-                ValorCSLL=rps.get('ValorCSLL'),
+                ValorServicos='%.02f' % round(valor_servicos, 2),
+                ValorDeducoes='%.02f' % round(rps.get('ValorDeducoes'), 2),
+                ValorPIS='%.02f' % round(rps.get('ValorPIS'), 2),
+                ValorCOFINS='%.02f' % round(rps.get('ValorCOFINS'), 2),
+                ValorINSS='%.02f' % round(rps.get('ValorINSS'), 2),
+                ValorIR='%.02f' % round(rps.get('ValorIR'), 2),
+                ValorCSLL='%.02f' % round(rps.get('ValorCSLL'), 2),
                 CodigoServico=rps.get('CodigoServico'),
                 AliquotaServicos=rps.get('AliquotaServicos'),
                 ISSRetido=rps.get('ISSRetido'),
-                CPFCNPJTomador=cpf_cnpj_tomador,
+                CPFCNPJTomador=tpCPFCNPJ(CNPJ=rps.get('CPFCNPJTomador')),
                 InscricaoMunicipalTomador=inscr_mun_tomador,
                 InscricaoEstadualTomador=inscr_est_tomador,
                 RazaoSocialTomador=self._remove_accents(

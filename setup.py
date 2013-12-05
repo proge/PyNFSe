@@ -2,9 +2,9 @@ from distutils.core import setup
 
 setup(
     name = "PyNFSe",
-    packages = ['pysped_nfse', 'pysped_nfse/sp'],
+    packages = ['pysped_nfse', 'pysped_nfse/sp', 'pysped_nfse/rj'],
     package_data = {
-        'pysped_nfse': ['*.xsd', 'sp/*.xsd'],
+        'pysped_nfse': ['*.xsd', 'sp/*.xsd', 'rj/*.xsd'],
         },
     version = "0.0.2",
     description = "Library for SPED NFS-e specification",

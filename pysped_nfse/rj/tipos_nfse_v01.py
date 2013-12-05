@@ -1,19 +1,22 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*- 
+# -*- coding: utf-8 -*-
 
 #
-# Generated Fri Aug 31 12:02:44 2012 by generateDS.py version 2.7b.
+# Generated Wed Aug 28 12:15:59 2013 by generateDS.py version 2.11a.
 #
 
 import sys
 import getopt
 import re as re_
+import base64
+import datetime as datetime_
 
 etree_ = None
 Verbose_import_ = False
-(   XMLParser_import_none, XMLParser_import_lxml,
+(
+    XMLParser_import_none, XMLParser_import_lxml,
     XMLParser_import_elementtree
-    ) = range(3)
+) = range(3)
 XMLParser_import_library = None
 try:
     # lxml
@@ -50,11 +53,13 @@ except ImportError:
                     if Verbose_import_:
                         print("running with ElementTree")
                 except ImportError:
-                    raise ImportError("Failed to import ElementTree from any known place")
+                    raise ImportError(
+                        "Failed to import ElementTree from any known place")
+
 
 def parsexml_(*args, **kwargs):
     if (XMLParser_import_library == XMLParser_import_lxml and
-        'parser' not in kwargs):
+            'parser' not in kwargs):
         # Use the lxml ElementTree compatible parser so that, e.g.,
         #   we ignore comments.
         kwargs['parser'] = etree_.ETCompatXMLParser()
@@ -73,9 +78,24 @@ try:
 except ImportError, exp:
 
     class GeneratedsSuper(object):
+        tzoff_pattern = re_.compile(r'(\+|-)((0\d|1[0-3]):[0-5]\d|14:00)$')
+        class _FixedOffsetTZ(datetime_.tzinfo):
+            def __init__(self, offset, name):
+                self.__offset = datetime_.timedelta(minutes=offset)
+                self.__name = name
+            def utcoffset(self, dt):
+                return self.__offset
+            def tzname(self, dt):
+                return self.__name
+            def dst(self, dt):
+                return None
         def gds_format_string(self, input_data, input_name=''):
             return input_data
         def gds_validate_string(self, input_data, node, input_name=''):
+            return input_data
+        def gds_format_base64(self, input_data, input_name=''):
+            return base64.b64encode(input_data)
+        def gds_validate_base64(self, input_data, node, input_name=''):
             return input_data
         def gds_format_integer(self, input_data, input_name=''):
             return '%d' % input_data
@@ -87,12 +107,12 @@ except ImportError, exp:
             values = input_data.split()
             for value in values:
                 try:
-                    fvalue = float(value)
-                except (TypeError, ValueError), exp:
+                    float(value)
+                except (TypeError, ValueError):
                     raise_parse_error(node, 'Requires sequence of integers')
             return input_data
         def gds_format_float(self, input_data, input_name=''):
-            return '%f' % input_data
+            return ('%.15f' % input_data).rstrip('0')
         def gds_validate_float(self, input_data, node, input_name=''):
             return input_data
         def gds_format_float_list(self, input_data, input_name=''):
@@ -101,8 +121,8 @@ except ImportError, exp:
             values = input_data.split()
             for value in values:
                 try:
-                    fvalue = float(value)
-                except (TypeError, ValueError), exp:
+                    float(value)
+                except (TypeError, ValueError):
                     raise_parse_error(node, 'Requires sequence of floats')
             return input_data
         def gds_format_double(self, input_data, input_name=''):
@@ -115,12 +135,12 @@ except ImportError, exp:
             values = input_data.split()
             for value in values:
                 try:
-                    fvalue = float(value)
-                except (TypeError, ValueError), exp:
+                    float(value)
+                except (TypeError, ValueError):
                     raise_parse_error(node, 'Requires sequence of doubles')
             return input_data
         def gds_format_boolean(self, input_data, input_name=''):
-            return '%s' % input_data
+            return ('%s' % input_data).lower()
         def gds_validate_boolean(self, input_data, node, input_name=''):
             return input_data
         def gds_format_boolean_list(self, input_data, input_name=''):
@@ -129,8 +149,173 @@ except ImportError, exp:
             values = input_data.split()
             for value in values:
                 if value not in ('true', '1', 'false', '0', ):
-                    raise_parse_error(node, 'Requires sequence of booleans ("true", "1", "false", "0")')
+                    raise_parse_error(
+                        node,
+                        'Requires sequence of booleans '
+                        '("true", "1", "false", "0")')
             return input_data
+        def gds_validate_datetime(self, input_data, node, input_name=''):
+            return input_data
+        def gds_format_datetime(self, input_data, input_name=''):
+            if input_data.microsecond == 0:
+                _svalue = '%04d-%02d-%02dT%02d:%02d:%02d' % (
+                    input_data.year,
+                    input_data.month,
+                    input_data.day,
+                    input_data.hour,
+                    input_data.minute,
+                    input_data.second,
+                )
+            else:
+                _svalue = '%04d-%02d-%02dT%02d:%02d:%02d.%s' % (
+                    input_data.year,
+                    input_data.month,
+                    input_data.day,
+                    input_data.hour,
+                    input_data.minute,
+                    input_data.second,
+                    ('%f' % (float(input_data.microsecond) / 1000000))[2:],
+                )
+            if input_data.tzinfo is not None:
+                tzoff = input_data.tzinfo.utcoffset(input_data)
+                if tzoff is not None:
+                    total_seconds = tzoff.seconds + (86400 * tzoff.days)
+                    if total_seconds == 0:
+                        _svalue += 'Z'
+                    else:
+                        if total_seconds < 0:
+                            _svalue += '-'
+                            total_seconds *= -1
+                        else:
+                            _svalue += '+'
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds - (hours * 3600)) // 60
+                        _svalue += '{0:02d}:{1:02d}'.format(hours, minutes)
+            return _svalue
+        @classmethod
+        def gds_parse_datetime(cls, input_data):
+            tz = None
+            if input_data[-1] == 'Z':
+                tz = GeneratedsSuper._FixedOffsetTZ(0, 'UTC')
+                input_data = input_data[:-1]
+            else:
+                results = GeneratedsSuper.tzoff_pattern.search(input_data)
+                if results is not None:
+                    tzoff_parts = results.group(2).split(':')
+                    tzoff = int(tzoff_parts[0]) * 60 + int(tzoff_parts[1])
+                    if results.group(1) == '-':
+                        tzoff *= -1
+                    tz = GeneratedsSuper._FixedOffsetTZ(
+                        tzoff, results.group(0))
+                    input_data = input_data[:-6]
+            if len(input_data.split('.')) > 1:
+                dt = datetime_.datetime.strptime(
+                    input_data, '%Y-%m-%dT%H:%M:%S.%f')
+            else:
+                dt = datetime_.datetime.strptime(
+                    input_data, '%Y-%m-%dT%H:%M:%S')
+            dt = dt.replace(tzinfo=tz)
+            return dt
+        def gds_validate_date(self, input_data, node, input_name=''):
+            return input_data
+        def gds_format_date(self, input_data, input_name=''):
+            _svalue = '%04d-%02d-%02d' % (
+                input_data.year,
+                input_data.month,
+                input_data.day,
+            )
+            try:
+                if input_data.tzinfo is not None:
+                    tzoff = input_data.tzinfo.utcoffset(input_data)
+                    if tzoff is not None:
+                        total_seconds = tzoff.seconds + (86400 * tzoff.days)
+                        if total_seconds == 0:
+                            _svalue += 'Z'
+                        else:
+                            if total_seconds < 0:
+                                _svalue += '-'
+                                total_seconds *= -1
+                            else:
+                                _svalue += '+'
+                            hours = total_seconds // 3600
+                            minutes = (total_seconds - (hours * 3600)) // 60
+                            _svalue += '{0:02d}:{1:02d}'.format(hours, minutes)
+            except AttributeError:
+                pass
+            return _svalue
+        @classmethod
+        def gds_parse_date(cls, input_data):
+            tz = None
+            if input_data[-1] == 'Z':
+                tz = GeneratedsSuper._FixedOffsetTZ(0, 'UTC')
+                input_data = input_data[:-1]
+            else:
+                results = GeneratedsSuper.tzoff_pattern.search(input_data)
+                if results is not None:
+                    tzoff_parts = results.group(2).split(':')
+                    tzoff = int(tzoff_parts[0]) * 60 + int(tzoff_parts[1])
+                    if results.group(1) == '-':
+                        tzoff *= -1
+                    tz = GeneratedsSuper._FixedOffsetTZ(
+                        tzoff, results.group(0))
+                    input_data = input_data[:-6]
+            dt = datetime_.datetime.strptime(input_data, '%Y-%m-%d')
+            dt = dt.replace(tzinfo=tz)
+            return dt.date()
+        def gds_validate_time(self, input_data, node, input_name=''):
+            return input_data
+        def gds_format_time(self, input_data, input_name=''):
+            if input_data.microsecond == 0:
+                _svalue = '%02d:%02d:%02d' % (
+                    input_data.hour,
+                    input_data.minute,
+                    input_data.second,
+                )
+            else:
+                _svalue = '%02d:%02d:%02d.%s' % (
+                    input_data.hour,
+                    input_data.minute,
+                    input_data.second,
+                    ('%f' % (float(input_data.microsecond) / 1000000))[2:],
+                )
+            if input_data.tzinfo is not None:
+                tzoff = input_data.tzinfo.utcoffset(input_data)
+                if tzoff is not None:
+                    total_seconds = tzoff.seconds + (86400 * tzoff.days)
+                    if total_seconds == 0:
+                        _svalue += 'Z'
+                    else:
+                        if total_seconds < 0:
+                            _svalue += '-'
+                            total_seconds *= -1
+                        else:
+                            _svalue += '+'
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds - (hours * 3600)) // 60
+                        _svalue += '{0:02d}:{1:02d}'.format(hours, minutes)
+            return _svalue
+        @classmethod
+        def gds_parse_time(cls, input_data):
+            tz = None
+            if input_data[-1] == 'Z':
+                tz = GeneratedsSuper._FixedOffsetTZ(0, 'UTC')
+                input_data = input_data[:-1]
+            else:
+                results = GeneratedsSuper.tzoff_pattern.search(input_data)
+                if results is not None:
+                    tzoff_parts = results.group(2).split(':')
+                    tzoff = int(tzoff_parts[0]) * 60 + int(tzoff_parts[1])
+                    if results.group(1) == '-':
+                        tzoff *= -1
+                    tz = GeneratedsSuper._FixedOffsetTZ(
+                        tzoff, results.group(0))
+                    input_data = input_data[:-6]
+            if len(input_data.split('.')) > 1:
+                dt = datetime_.datetime.strptime(input_data, '%H:%M:%S.%f')
+            else:
+                dt = datetime_.datetime.strptime(input_data, '%H:%M:%S')
+            dt = dt.replace(tzinfo=tz)
+            return dt.time()
         def gds_str_lower(self, instring):
             return instring.lower()
         def get_path_(self, node):
@@ -161,6 +346,9 @@ except ImportError, exp:
             return class_obj1
         def gds_build_any(self, node, type_name=None):
             return None
+        @classmethod
+        def gds_reverse_node_mapping(cls, mapping):
+            return dict(((v, k) for k, v in mapping.iteritems()))
 
 
 #
@@ -191,9 +379,12 @@ Namespace_extract_pat_ = re_.compile(r'{(.*)}(.*)')
 # Support/utility functions.
 #
 
-def showIndent(outfile, level):
-    for idx in range(level):
-        outfile.write('    ')
+
+def showIndent(outfile, level, pretty_print=True):
+    if pretty_print:
+        for idx in range(level):
+            outfile.write('    ')
+
 
 def quote_xml(inStr):
     if not inStr:
@@ -204,6 +395,7 @@ def quote_xml(inStr):
     s1 = s1.replace('<', '&lt;')
     s1 = s1.replace('>', '&gt;')
     return s1
+
 
 def quote_attrib(inStr):
     s1 = (isinstance(inStr, basestring) and inStr or
@@ -220,6 +412,7 @@ def quote_attrib(inStr):
         s1 = '"%s"' % s1
     return s1
 
+
 def quote_python(inStr):
     s1 = inStr
     if s1.find("'") == -1:
@@ -235,6 +428,7 @@ def quote_python(inStr):
         else:
             return '"""%s"""' % s1
 
+
 def get_all_text_(node):
     if node.text is not None:
         text = node.text
@@ -244,6 +438,7 @@ def get_all_text_(node):
         if child.tail is not None:
             text += child.tail
     return text
+
 
 def find_attr_value_(attr_name, node):
     attrs = node.attrib
@@ -262,9 +457,11 @@ def find_attr_value_(attr_name, node):
 class GDSParseError(Exception):
     pass
 
+
 def raise_parse_error(node, msg):
     if XMLParser_import_library == XMLParser_import_lxml:
-        msg = '%s (element %s/line %d)' % (msg, node.tag, node.sourceline, )
+        msg = '%s (element %s/line %d)' % (
+            msg, node.tag, node.sourceline, )
     else:
         msg = '%s (element %s)' % (msg, node.tag, )
     raise GDSParseError(msg)
@@ -285,6 +482,7 @@ class MixedContainer:
     TypeDecimal = 5
     TypeDouble = 6
     TypeBoolean = 7
+    TypeBase64 = 8
     def __init__(self, category, content_type, name, value):
         self.category = category
         self.content_type = content_type
@@ -298,39 +496,82 @@ class MixedContainer:
         return self.value
     def getName(self):
         return self.name
-    def export(self, outfile, level, name, namespace):
+    def export(self, outfile, level, name, namespace, pretty_print=True):
         if self.category == MixedContainer.CategoryText:
             # Prevent exporting empty content as empty lines.
-            if self.value.strip(): 
+            if self.value.strip():
                 outfile.write(self.value)
         elif self.category == MixedContainer.CategorySimple:
             self.exportSimple(outfile, level, name)
         else:    # category == MixedContainer.CategoryComplex
-            self.value.export(outfile, level, namespace,name)
+            self.value.export(outfile, level, namespace, name, pretty_print)
     def exportSimple(self, outfile, level, name):
         if self.content_type == MixedContainer.TypeString:
-            outfile.write('<%s>%s</%s>' % (self.name, self.value, self.name))
+            outfile.write('<%s>%s</%s>' % (
+                self.name, self.value, self.name))
         elif self.content_type == MixedContainer.TypeInteger or \
                 self.content_type == MixedContainer.TypeBoolean:
-            outfile.write('<%s>%d</%s>' % (self.name, self.value, self.name))
+            outfile.write('<%s>%d</%s>' % (
+                self.name, self.value, self.name))
         elif self.content_type == MixedContainer.TypeFloat or \
                 self.content_type == MixedContainer.TypeDecimal:
-            outfile.write('<%s>%f</%s>' % (self.name, self.value, self.name))
+            outfile.write('<%s>%f</%s>' % (
+                self.name, self.value, self.name))
         elif self.content_type == MixedContainer.TypeDouble:
-            outfile.write('<%s>%g</%s>' % (self.name, self.value, self.name))
+            outfile.write('<%s>%g</%s>' % (
+                self.name, self.value, self.name))
+        elif self.content_type == MixedContainer.TypeBase64:
+            outfile.write('<%s>%s</%s>' % (
+                self.name, base64.b64encode(self.value), self.name))
+    def to_etree(self, element):
+        if self.category == MixedContainer.CategoryText:
+            # Prevent exporting empty content as empty lines.
+            if self.value.strip():
+                if len(element) > 0:
+                    if element[-1].tail is None:
+                        element[-1].tail = self.value
+                    else:
+                        element[-1].tail += self.value
+                else:
+                    if element.text is None:
+                        element.text = self.value
+                    else:
+                        element.text += self.value
+        elif self.category == MixedContainer.CategorySimple:
+            subelement = etree_.SubElement(element, '%s' % self.name)
+            subelement.text = self.to_etree_simple()
+        else:    # category == MixedContainer.CategoryComplex
+            self.value.to_etree(element)
+    def to_etree_simple(self):
+        if self.content_type == MixedContainer.TypeString:
+            text = self.value
+        elif (self.content_type == MixedContainer.TypeInteger or
+                self.content_type == MixedContainer.TypeBoolean):
+            text = '%d' % self.value
+        elif (self.content_type == MixedContainer.TypeFloat or
+                self.content_type == MixedContainer.TypeDecimal):
+            text = '%f' % self.value
+        elif self.content_type == MixedContainer.TypeDouble:
+            text = '%g' % self.value
+        elif self.content_type == MixedContainer.TypeBase64:
+            text = '%s' % base64.b64encode(self.value)
+        return text
     def exportLiteral(self, outfile, level, name):
         if self.category == MixedContainer.CategoryText:
             showIndent(outfile, level)
-            outfile.write('model_.MixedContainer(%d, %d, "%s", "%s"),\n' % \
-                (self.category, self.content_type, self.name, self.value))
+            outfile.write(
+                'model_.MixedContainer(%d, %d, "%s", "%s"),\n' % (
+                    self.category, self.content_type, self.name, self.value))
         elif self.category == MixedContainer.CategorySimple:
             showIndent(outfile, level)
-            outfile.write('model_.MixedContainer(%d, %d, "%s", "%s"),\n' % \
-                (self.category, self.content_type, self.name, self.value))
+            outfile.write(
+                'model_.MixedContainer(%d, %d, "%s", "%s"),\n' % (
+                    self.category, self.content_type, self.name, self.value))
         else:    # category == MixedContainer.CategoryComplex
             showIndent(outfile, level)
-            outfile.write('model_.MixedContainer(%d, %d, "%s",\n' % \
-                (self.category, self.content_type, self.name,))
+            outfile.write(
+                'model_.MixedContainer(%d, %d, "%s",\n' % (
+                    self.category, self.content_type, self.name,))
             self.value.exportLiteral(outfile, level + 1)
             showIndent(outfile, level)
             outfile.write(')\n')
@@ -356,6 +597,7 @@ class MemberSpec_(object):
     def set_container(self, container): self.container = container
     def get_container(self): return self.container
 
+
 def _cast(typ, value):
     if typ is None or value is None:
         return value
@@ -364,6 +606,7 @@ def _cast(typ, value):
 #
 # Data representation classes.
 #
+
 
 class tcCpfCnpj(GeneratedsSuper):
     subclass = None
@@ -379,46 +622,55 @@ class tcCpfCnpj(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Cpf(self): return self.Cpf
     def set_Cpf(self, Cpf): self.Cpf = Cpf
+    def get_Cnpj(self): return self.Cnpj
+    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
     def validate_tsCpf(self, value):
         # Validate type tsCpf, a restriction on xsd:string.
         pass
-    def get_Cnpj(self): return self.Cnpj
-    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
     def validate_tsCnpj(self, value):
         # Validate type tsCnpj, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcCpfCnpj', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCpfCnpj')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCpfCnpj'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcCpfCnpj', fromsubclass_=False):
-        if self.Cpf is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCpf>%s</%sCpf>\n' % (namespace_, self.gds_format_string(quote_xml(self.Cpf).encode(ExternalEncoding), input_name='Cpf'), namespace_))
-        if self.Cnpj is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCnpj>%s</%sCnpj>\n' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_))
     def hasContent_(self):
         if (
             self.Cpf is not None or
             self.Cnpj is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcCpfCnpj', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCpfCnpj')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCpfCnpj'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcCpfCnpj', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Cpf is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCpf>%s</%sCpf>%s' % (namespace_, self.gds_format_string(quote_xml(self.Cpf).encode(ExternalEncoding), input_name='Cpf'), namespace_, eol_))
+        if self.Cnpj is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCnpj>%s</%sCnpj>%s' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcCpfCnpj'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -431,7 +683,8 @@ class tcCpfCnpj(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Cnpj=%s,\n' % quote_python(self.Cnpj).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -470,75 +723,39 @@ class tcEndereco(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Endereco(self): return self.Endereco
     def set_Endereco(self, Endereco): self.Endereco = Endereco
+    def get_Numero(self): return self.Numero
+    def set_Numero(self, Numero): self.Numero = Numero
+    def get_Complemento(self): return self.Complemento
+    def set_Complemento(self, Complemento): self.Complemento = Complemento
+    def get_Bairro(self): return self.Bairro
+    def set_Bairro(self, Bairro): self.Bairro = Bairro
+    def get_CodigoMunicipio(self): return self.CodigoMunicipio
+    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
+    def get_Uf(self): return self.Uf
+    def set_Uf(self, Uf): self.Uf = Uf
+    def get_Cep(self): return self.Cep
+    def set_Cep(self, Cep): self.Cep = Cep
     def validate_tsEndereco(self, value):
         # Validate type tsEndereco, a restriction on xsd:string.
         pass
-    def get_Numero(self): return self.Numero
-    def set_Numero(self, Numero): self.Numero = Numero
     def validate_tsNumeroEndereco(self, value):
         # Validate type tsNumeroEndereco, a restriction on xsd:string.
         pass
-    def get_Complemento(self): return self.Complemento
-    def set_Complemento(self, Complemento): self.Complemento = Complemento
     def validate_tsComplementoEndereco(self, value):
         # Validate type tsComplementoEndereco, a restriction on xsd:string.
         pass
-    def get_Bairro(self): return self.Bairro
-    def set_Bairro(self, Bairro): self.Bairro = Bairro
     def validate_tsBairro(self, value):
         # Validate type tsBairro, a restriction on xsd:string.
         pass
-    def get_CodigoMunicipio(self): return self.CodigoMunicipio
-    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
     def validate_tsCodigoMunicipioIbge(self, value):
         # Validate type tsCodigoMunicipioIbge, a restriction on xsd:int.
         pass
-    def get_Uf(self): return self.Uf
-    def set_Uf(self, Uf): self.Uf = Uf
     def validate_tsUf(self, value):
         # Validate type tsUf, a restriction on xsd:string.
         pass
-    def get_Cep(self): return self.Cep
-    def set_Cep(self, Cep): self.Cep = Cep
     def validate_tsCep(self, value):
         # Validate type tsCep, a restriction on xsd:int.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcEndereco', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcEndereco')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcEndereco'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcEndereco', fromsubclass_=False):
-        if self.Endereco is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sEndereco>%s</%sEndereco>\n' % (namespace_, self.gds_format_string(quote_xml(self.Endereco).encode(ExternalEncoding), input_name='Endereco'), namespace_))
-        if self.Numero is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumero>%s</%sNumero>\n' % (namespace_, self.gds_format_string(quote_xml(self.Numero).encode(ExternalEncoding), input_name='Numero'), namespace_))
-        if self.Complemento is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sComplemento>%s</%sComplemento>\n' % (namespace_, self.gds_format_string(quote_xml(self.Complemento).encode(ExternalEncoding), input_name='Complemento'), namespace_))
-        if self.Bairro is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sBairro>%s</%sBairro>\n' % (namespace_, self.gds_format_string(quote_xml(self.Bairro).encode(ExternalEncoding), input_name='Bairro'), namespace_))
-        if self.CodigoMunicipio is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>\n' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_))
-        if self.Uf is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sUf>%s</%sUf>\n' % (namespace_, self.gds_format_string(quote_xml(self.Uf).encode(ExternalEncoding), input_name='Uf'), namespace_))
-        if self.Cep is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCep>%s</%sCep>\n' % (namespace_, self.gds_format_integer(self.Cep, input_name='Cep'), namespace_))
     def hasContent_(self):
         if (
             self.Endereco is not None or
@@ -548,13 +765,58 @@ class tcEndereco(GeneratedsSuper):
             self.CodigoMunicipio is not None or
             self.Uf is not None or
             self.Cep is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcEndereco', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcEndereco')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcEndereco'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcEndereco', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Endereco is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sEndereco>%s</%sEndereco>%s' % (namespace_, self.gds_format_string(quote_xml(self.Endereco).encode(ExternalEncoding), input_name='Endereco'), namespace_, eol_))
+        if self.Numero is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumero>%s</%sNumero>%s' % (namespace_, self.gds_format_string(quote_xml(self.Numero).encode(ExternalEncoding), input_name='Numero'), namespace_, eol_))
+        if self.Complemento is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sComplemento>%s</%sComplemento>%s' % (namespace_, self.gds_format_string(quote_xml(self.Complemento).encode(ExternalEncoding), input_name='Complemento'), namespace_, eol_))
+        if self.Bairro is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sBairro>%s</%sBairro>%s' % (namespace_, self.gds_format_string(quote_xml(self.Bairro).encode(ExternalEncoding), input_name='Bairro'), namespace_, eol_))
+        if self.CodigoMunicipio is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>%s' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_, eol_))
+        if self.Uf is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sUf>%s</%sUf>%s' % (namespace_, self.gds_format_string(quote_xml(self.Uf).encode(ExternalEncoding), input_name='Uf'), namespace_, eol_))
+        if self.Cep is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCep>%s</%sCep>%s' % (namespace_, self.gds_format_integer(self.Cep, input_name='Cep'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcEndereco'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -582,7 +844,8 @@ class tcEndereco(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Cep=%d,\n' % self.Cep)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -649,46 +912,55 @@ class tcContato(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Telefone(self): return self.Telefone
     def set_Telefone(self, Telefone): self.Telefone = Telefone
+    def get_Email(self): return self.Email
+    def set_Email(self, Email): self.Email = Email
     def validate_tsTelefone(self, value):
         # Validate type tsTelefone, a restriction on xsd:string.
         pass
-    def get_Email(self): return self.Email
-    def set_Email(self, Email): self.Email = Email
     def validate_tsEmail(self, value):
         # Validate type tsEmail, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcContato', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcContato')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcContato'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcContato', fromsubclass_=False):
-        if self.Telefone is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sTelefone>%s</%sTelefone>\n' % (namespace_, self.gds_format_string(quote_xml(self.Telefone).encode(ExternalEncoding), input_name='Telefone'), namespace_))
-        if self.Email is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sEmail>%s</%sEmail>\n' % (namespace_, self.gds_format_string(quote_xml(self.Email).encode(ExternalEncoding), input_name='Email'), namespace_))
     def hasContent_(self):
         if (
             self.Telefone is not None or
             self.Email is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcContato', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcContato')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcContato'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcContato', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Telefone is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sTelefone>%s</%sTelefone>%s' % (namespace_, self.gds_format_string(quote_xml(self.Telefone).encode(ExternalEncoding), input_name='Telefone'), namespace_, eol_))
+        if self.Email is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sEmail>%s</%sEmail>%s' % (namespace_, self.gds_format_string(quote_xml(self.Email).encode(ExternalEncoding), input_name='Email'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcContato'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -701,7 +973,8 @@ class tcContato(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Email=%s,\n' % quote_python(self.Email).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -735,46 +1008,55 @@ class tcIdentificacaoOrgaoGerador(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_CodigoMunicipio(self): return self.CodigoMunicipio
     def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
+    def get_Uf(self): return self.Uf
+    def set_Uf(self, Uf): self.Uf = Uf
     def validate_tsCodigoMunicipioIbge(self, value):
         # Validate type tsCodigoMunicipioIbge, a restriction on xsd:int.
         pass
-    def get_Uf(self): return self.Uf
-    def set_Uf(self, Uf): self.Uf = Uf
     def validate_tsUf(self, value):
         # Validate type tsUf, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoOrgaoGerador', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoOrgaoGerador')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoOrgaoGerador'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoOrgaoGerador', fromsubclass_=False):
-        if self.CodigoMunicipio is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>\n' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_))
-        if self.Uf is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sUf>%s</%sUf>\n' % (namespace_, self.gds_format_string(quote_xml(self.Uf).encode(ExternalEncoding), input_name='Uf'), namespace_))
     def hasContent_(self):
         if (
             self.CodigoMunicipio is not None or
             self.Uf is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoOrgaoGerador', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoOrgaoGerador')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoOrgaoGerador'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoOrgaoGerador', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.CodigoMunicipio is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>%s' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_, eol_))
+        if self.Uf is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sUf>%s</%sUf>%s' % (namespace_, self.gds_format_string(quote_xml(self.Uf).encode(ExternalEncoding), input_name='Uf'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoOrgaoGerador'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -787,7 +1069,8 @@ class tcIdentificacaoOrgaoGerador(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Uf=%s,\n' % quote_python(self.Uf).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -826,55 +1109,64 @@ class tcIdentificacaoRps(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Numero(self): return self.Numero
     def set_Numero(self, Numero): self.Numero = Numero
+    def get_Serie(self): return self.Serie
+    def set_Serie(self, Serie): self.Serie = Serie
+    def get_Tipo(self): return self.Tipo
+    def set_Tipo(self, Tipo): self.Tipo = Tipo
     def validate_tsNumeroRps(self, value):
         # Validate type tsNumeroRps, a restriction on xsd:nonNegativeInteger.
         pass
-    def get_Serie(self): return self.Serie
-    def set_Serie(self, Serie): self.Serie = Serie
     def validate_tsSerieRps(self, value):
         # Validate type tsSerieRps, a restriction on xsd:string.
         pass
-    def get_Tipo(self): return self.Tipo
-    def set_Tipo(self, Tipo): self.Tipo = Tipo
     def validate_tsTipoRps(self, value):
         # Validate type tsTipoRps, a restriction on xsd:byte.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoRps', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoRps')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoRps'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoRps', fromsubclass_=False):
-        if self.Numero is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumero>%s</%sNumero>\n' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_))
-        if self.Serie is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sSerie>%s</%sSerie>\n' % (namespace_, self.gds_format_string(quote_xml(self.Serie).encode(ExternalEncoding), input_name='Serie'), namespace_))
-        if self.Tipo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sTipo>%s</%sTipo>\n' % (namespace_, self.gds_format_integer(self.Tipo, input_name='Tipo'), namespace_))
     def hasContent_(self):
         if (
             self.Numero is not None or
             self.Serie is not None or
             self.Tipo is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoRps', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoRps')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoRps'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoRps', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Numero is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumero>%s</%sNumero>%s' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_, eol_))
+        if self.Serie is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sSerie>%s</%sSerie>%s' % (namespace_, self.gds_format_string(quote_xml(self.Serie).encode(ExternalEncoding), input_name='Serie'), namespace_, eol_))
+        if self.Tipo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sTipo>%s</%sTipo>%s' % (namespace_, self.gds_format_integer(self.Tipo, input_name='Tipo'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoRps'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -890,7 +1182,8 @@ class tcIdentificacaoRps(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Tipo=%d,\n' % self.Tipo)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -939,46 +1232,55 @@ class tcIdentificacaoPrestador(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Cnpj(self): return self.Cnpj
     def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
+    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
+    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
     def validate_tsCnpj(self, value):
         # Validate type tsCnpj, a restriction on xsd:string.
         pass
-    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
-    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
     def validate_tsInscricaoMunicipal(self, value):
         # Validate type tsInscricaoMunicipal, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoPrestador', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoPrestador')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoPrestador'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoPrestador', fromsubclass_=False):
-        if self.Cnpj is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCnpj>%s</%sCnpj>\n' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_))
-        if self.InscricaoMunicipal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>\n' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_))
     def hasContent_(self):
         if (
             self.Cnpj is not None or
             self.InscricaoMunicipal is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoPrestador', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoPrestador')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoPrestador'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoPrestador', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Cnpj is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCnpj>%s</%sCnpj>%s' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_, eol_))
+        if self.InscricaoMunicipal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>%s' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoPrestador'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -991,7 +1293,8 @@ class tcIdentificacaoPrestador(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('InscricaoMunicipal=%s,\n' % quote_python(self.InscricaoMunicipal).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1030,37 +1333,46 @@ class tcIdentificacaoTomador(GeneratedsSuper):
     def validate_tsInscricaoMunicipal(self, value):
         # Validate type tsInscricaoMunicipal, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoTomador', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoTomador')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoTomador'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoTomador', fromsubclass_=False):
-        if self.CpfCnpj is not None:
-            self.CpfCnpj.export(outfile, level, namespace_, name_='CpfCnpj')
-        if self.InscricaoMunicipal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>\n' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_))
     def hasContent_(self):
         if (
             self.CpfCnpj is not None or
             self.InscricaoMunicipal is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoTomador', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoTomador')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoTomador'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoTomador', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.CpfCnpj is not None:
+            self.CpfCnpj.export(outfile, level, namespace_, name_='CpfCnpj', pretty_print=pretty_print)
+        if self.InscricaoMunicipal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>%s' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoTomador'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1076,7 +1388,8 @@ class tcIdentificacaoTomador(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('InscricaoMunicipal=%s,\n' % quote_python(self.InscricaoMunicipal).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1086,7 +1399,7 @@ class tcIdentificacaoTomador(GeneratedsSuper):
         if nodeName_ == 'CpfCnpj':
             obj_ = tcCpfCnpj.factory()
             obj_.build(child_)
-            self.set_CpfCnpj(obj_)
+            self.CpfCnpj = obj_
         elif nodeName_ == 'InscricaoMunicipal':
             InscricaoMunicipal_ = child_.text
             InscricaoMunicipal_ = self.gds_validate_string(InscricaoMunicipal_, node, 'InscricaoMunicipal')
@@ -1113,50 +1426,59 @@ class tcDadosTomador(GeneratedsSuper):
     def set_IdentificacaoTomador(self, IdentificacaoTomador): self.IdentificacaoTomador = IdentificacaoTomador
     def get_RazaoSocial(self): return self.RazaoSocial
     def set_RazaoSocial(self, RazaoSocial): self.RazaoSocial = RazaoSocial
-    def validate_tsRazaoSocial(self, value):
-        # Validate type tsRazaoSocial, a restriction on xsd:string.
-        pass
     def get_Endereco(self): return self.Endereco
     def set_Endereco(self, Endereco): self.Endereco = Endereco
     def get_Contato(self): return self.Contato
     def set_Contato(self, Contato): self.Contato = Contato
-    def export(self, outfile, level, namespace_='', name_='tcDadosTomador', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosTomador')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosTomador'):
+    def validate_tsRazaoSocial(self, value):
+        # Validate type tsRazaoSocial, a restriction on xsd:string.
         pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosTomador', fromsubclass_=False):
-        if self.IdentificacaoTomador is not None:
-            self.IdentificacaoTomador.export(outfile, level, namespace_, name_='IdentificacaoTomador')
-        if self.RazaoSocial is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>\n' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_))
-        if self.Endereco is not None:
-            self.Endereco.export(outfile, level, namespace_, name_='Endereco')
-        if self.Contato is not None:
-            self.Contato.export(outfile, level, namespace_, name_='Contato')
     def hasContent_(self):
         if (
             self.IdentificacaoTomador is not None or
             self.RazaoSocial is not None or
             self.Endereco is not None or
             self.Contato is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcDadosTomador', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosTomador')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosTomador'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosTomador', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoTomador is not None:
+            self.IdentificacaoTomador.export(outfile, level, namespace_, name_='IdentificacaoTomador', pretty_print=pretty_print)
+        if self.RazaoSocial is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>%s' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_, eol_))
+        if self.Endereco is not None:
+            self.Endereco.export(outfile, level, namespace_, name_='Endereco', pretty_print=pretty_print)
+        if self.Contato is not None:
+            self.Contato.export(outfile, level, namespace_, name_='Contato', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcDadosTomador'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1184,7 +1506,8 @@ class tcDadosTomador(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1194,7 +1517,7 @@ class tcDadosTomador(GeneratedsSuper):
         if nodeName_ == 'IdentificacaoTomador':
             obj_ = tcIdentificacaoTomador.factory()
             obj_.build(child_)
-            self.set_IdentificacaoTomador(obj_)
+            self.IdentificacaoTomador = obj_
         elif nodeName_ == 'RazaoSocial':
             RazaoSocial_ = child_.text
             RazaoSocial_ = self.gds_validate_string(RazaoSocial_, node, 'RazaoSocial')
@@ -1203,11 +1526,11 @@ class tcDadosTomador(GeneratedsSuper):
         elif nodeName_ == 'Endereco':
             obj_ = tcEndereco.factory()
             obj_.build(child_)
-            self.set_Endereco(obj_)
+            self.Endereco = obj_
         elif nodeName_ == 'Contato':
             obj_ = tcContato.factory()
             obj_.build(child_)
-            self.set_Contato(obj_)
+            self.Contato = obj_
 # end class tcDadosTomador
 
 
@@ -1226,51 +1549,60 @@ class tcIdentificacaoIntermediarioServico(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_RazaoSocial(self): return self.RazaoSocial
     def set_RazaoSocial(self, RazaoSocial): self.RazaoSocial = RazaoSocial
-    def validate_tsRazaoSocial(self, value):
-        # Validate type tsRazaoSocial, a restriction on xsd:string.
-        pass
     def get_CpfCnpj(self): return self.CpfCnpj
     def set_CpfCnpj(self, CpfCnpj): self.CpfCnpj = CpfCnpj
     def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
     def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
+    def validate_tsRazaoSocial(self, value):
+        # Validate type tsRazaoSocial, a restriction on xsd:string.
+        pass
     def validate_tsInscricaoMunicipal(self, value):
         # Validate type tsInscricaoMunicipal, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoIntermediarioServico', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoIntermediarioServico')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoIntermediarioServico'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoIntermediarioServico', fromsubclass_=False):
-        if self.RazaoSocial is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>\n' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_))
-        if self.CpfCnpj is not None:
-            self.CpfCnpj.export(outfile, level, namespace_, name_='CpfCnpj', )
-        if self.InscricaoMunicipal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>\n' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_))
     def hasContent_(self):
         if (
             self.RazaoSocial is not None or
             self.CpfCnpj is not None or
             self.InscricaoMunicipal is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoIntermediarioServico', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoIntermediarioServico')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoIntermediarioServico'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoIntermediarioServico', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.RazaoSocial is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>%s' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_, eol_))
+        if self.CpfCnpj is not None:
+            self.CpfCnpj.export(outfile, level, namespace_, name_='CpfCnpj', pretty_print=pretty_print)
+        if self.InscricaoMunicipal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>%s' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoIntermediarioServico'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1289,7 +1621,8 @@ class tcIdentificacaoIntermediarioServico(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('InscricaoMunicipal=%s,\n' % quote_python(self.InscricaoMunicipal).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1304,7 +1637,7 @@ class tcIdentificacaoIntermediarioServico(GeneratedsSuper):
         elif nodeName_ == 'CpfCnpj':
             obj_ = tcCpfCnpj.factory()
             obj_.build(child_)
-            self.set_CpfCnpj(obj_)
+            self.CpfCnpj = obj_
         elif nodeName_ == 'InscricaoMunicipal':
             InscricaoMunicipal_ = child_.text
             InscricaoMunicipal_ = self.gds_validate_string(InscricaoMunicipal_, node, 'InscricaoMunicipal')
@@ -1341,9 +1674,6 @@ class tcValores(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_ValorServicos(self): return self.ValorServicos
     def set_ValorServicos(self, ValorServicos): self.ValorServicos = ValorServicos
-    def validate_tsValor(self, value):
-        # Validate type tsValor, a restriction on xsd:decimal.
-        pass
     def get_ValorDeducoes(self): return self.ValorDeducoes
     def set_ValorDeducoes(self, ValorDeducoes): self.ValorDeducoes = ValorDeducoes
     def get_ValorPis(self): return self.ValorPis
@@ -1358,9 +1688,6 @@ class tcValores(GeneratedsSuper):
     def set_ValorCsll(self, ValorCsll): self.ValorCsll = ValorCsll
     def get_IssRetido(self): return self.IssRetido
     def set_IssRetido(self, IssRetido): self.IssRetido = IssRetido
-    def validate_tsSimNao(self, value):
-        # Validate type tsSimNao, a restriction on xsd:byte.
-        pass
     def get_ValorIss(self): return self.ValorIss
     def set_ValorIss(self, ValorIss): self.ValorIss = ValorIss
     def get_ValorIssRetido(self): return self.ValorIssRetido
@@ -1371,78 +1698,21 @@ class tcValores(GeneratedsSuper):
     def set_BaseCalculo(self, BaseCalculo): self.BaseCalculo = BaseCalculo
     def get_Aliquota(self): return self.Aliquota
     def set_Aliquota(self, Aliquota): self.Aliquota = Aliquota
-    def validate_tsAliquota(self, value):
-        # Validate type tsAliquota, a restriction on xsd:decimal.
-        pass
     def get_ValorLiquidoNfse(self): return self.ValorLiquidoNfse
     def set_ValorLiquidoNfse(self, ValorLiquidoNfse): self.ValorLiquidoNfse = ValorLiquidoNfse
     def get_DescontoIncondicionado(self): return self.DescontoIncondicionado
     def set_DescontoIncondicionado(self, DescontoIncondicionado): self.DescontoIncondicionado = DescontoIncondicionado
     def get_DescontoCondicionado(self): return self.DescontoCondicionado
     def set_DescontoCondicionado(self, DescontoCondicionado): self.DescontoCondicionado = DescontoCondicionado
-    def export(self, outfile, level, namespace_='', name_='tcValores', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcValores')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcValores'):
+    def validate_tsValor(self, value):
+        # Validate type tsValor, a restriction on xsd:decimal.
         pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcValores', fromsubclass_=False):
-        if self.ValorServicos is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorServicos>%s</%sValorServicos>\n' % (namespace_, self.gds_format_float(self.ValorServicos, input_name='ValorServicos'), namespace_))
-        if self.ValorDeducoes is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorDeducoes>%s</%sValorDeducoes>\n' % (namespace_, self.gds_format_float(self.ValorDeducoes, input_name='ValorDeducoes'), namespace_))
-        if self.ValorPis is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorPis>%s</%sValorPis>\n' % (namespace_, self.gds_format_float(self.ValorPis, input_name='ValorPis'), namespace_))
-        if self.ValorCofins is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorCofins>%s</%sValorCofins>\n' % (namespace_, self.gds_format_float(self.ValorCofins, input_name='ValorCofins'), namespace_))
-        if self.ValorInss is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorInss>%s</%sValorInss>\n' % (namespace_, self.gds_format_float(self.ValorInss, input_name='ValorInss'), namespace_))
-        if self.ValorIr is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorIr>%s</%sValorIr>\n' % (namespace_, self.gds_format_float(self.ValorIr, input_name='ValorIr'), namespace_))
-        if self.ValorCsll is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorCsll>%s</%sValorCsll>\n' % (namespace_, self.gds_format_float(self.ValorCsll, input_name='ValorCsll'), namespace_))
-        if self.IssRetido is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sIssRetido>%s</%sIssRetido>\n' % (namespace_, self.gds_format_integer(self.IssRetido, input_name='IssRetido'), namespace_))
-        if self.ValorIss is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorIss>%s</%sValorIss>\n' % (namespace_, self.gds_format_float(self.ValorIss, input_name='ValorIss'), namespace_))
-        if self.ValorIssRetido is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorIssRetido>%s</%sValorIssRetido>\n' % (namespace_, self.gds_format_float(self.ValorIssRetido, input_name='ValorIssRetido'), namespace_))
-        if self.OutrasRetencoes is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sOutrasRetencoes>%s</%sOutrasRetencoes>\n' % (namespace_, self.gds_format_float(self.OutrasRetencoes, input_name='OutrasRetencoes'), namespace_))
-        if self.BaseCalculo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sBaseCalculo>%s</%sBaseCalculo>\n' % (namespace_, self.gds_format_float(self.BaseCalculo, input_name='BaseCalculo'), namespace_))
-        if self.Aliquota is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sAliquota>%s</%sAliquota>\n' % (namespace_, self.gds_format_float(self.Aliquota, input_name='Aliquota'), namespace_))
-        if self.ValorLiquidoNfse is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorLiquidoNfse>%s</%sValorLiquidoNfse>\n' % (namespace_, self.gds_format_float(self.ValorLiquidoNfse, input_name='ValorLiquidoNfse'), namespace_))
-        if self.DescontoIncondicionado is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDescontoIncondicionado>%s</%sDescontoIncondicionado>\n' % (namespace_, self.gds_format_float(self.DescontoIncondicionado, input_name='DescontoIncondicionado'), namespace_))
-        if self.DescontoCondicionado is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDescontoCondicionado>%s</%sDescontoCondicionado>\n' % (namespace_, self.gds_format_float(self.DescontoCondicionado, input_name='DescontoCondicionado'), namespace_))
+    def validate_tsSimNao(self, value):
+        # Validate type tsSimNao, a restriction on xsd:byte.
+        pass
+    def validate_tsAliquota(self, value):
+        # Validate type tsAliquota, a restriction on xsd:decimal.
+        pass
     def hasContent_(self):
         if (
             self.ValorServicos is not None or
@@ -1461,13 +1731,85 @@ class tcValores(GeneratedsSuper):
             self.ValorLiquidoNfse is not None or
             self.DescontoIncondicionado is not None or
             self.DescontoCondicionado is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcValores', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcValores')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcValores'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcValores', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.ValorServicos is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorServicos>%s</%sValorServicos>%s' % (namespace_, self.gds_format_float(self.ValorServicos, input_name='ValorServicos'), namespace_, eol_))
+        if self.ValorDeducoes is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorDeducoes>%s</%sValorDeducoes>%s' % (namespace_, self.gds_format_float(self.ValorDeducoes, input_name='ValorDeducoes'), namespace_, eol_))
+        if self.ValorPis is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorPis>%s</%sValorPis>%s' % (namespace_, self.gds_format_float(self.ValorPis, input_name='ValorPis'), namespace_, eol_))
+        if self.ValorCofins is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorCofins>%s</%sValorCofins>%s' % (namespace_, self.gds_format_float(self.ValorCofins, input_name='ValorCofins'), namespace_, eol_))
+        if self.ValorInss is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorInss>%s</%sValorInss>%s' % (namespace_, self.gds_format_float(self.ValorInss, input_name='ValorInss'), namespace_, eol_))
+        if self.ValorIr is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorIr>%s</%sValorIr>%s' % (namespace_, self.gds_format_float(self.ValorIr, input_name='ValorIr'), namespace_, eol_))
+        if self.ValorCsll is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorCsll>%s</%sValorCsll>%s' % (namespace_, self.gds_format_float(self.ValorCsll, input_name='ValorCsll'), namespace_, eol_))
+        if self.IssRetido is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sIssRetido>%s</%sIssRetido>%s' % (namespace_, self.gds_format_integer(self.IssRetido, input_name='IssRetido'), namespace_, eol_))
+        if self.ValorIss is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorIss>%s</%sValorIss>%s' % (namespace_, self.gds_format_float(self.ValorIss, input_name='ValorIss'), namespace_, eol_))
+        if self.ValorIssRetido is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorIssRetido>%s</%sValorIssRetido>%s' % (namespace_, self.gds_format_float(self.ValorIssRetido, input_name='ValorIssRetido'), namespace_, eol_))
+        if self.OutrasRetencoes is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sOutrasRetencoes>%s</%sOutrasRetencoes>%s' % (namespace_, self.gds_format_float(self.OutrasRetencoes, input_name='OutrasRetencoes'), namespace_, eol_))
+        if self.BaseCalculo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sBaseCalculo>%s</%sBaseCalculo>%s' % (namespace_, self.gds_format_float(self.BaseCalculo, input_name='BaseCalculo'), namespace_, eol_))
+        if self.Aliquota is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sAliquota>%s</%sAliquota>%s' % (namespace_, self.gds_format_float(self.Aliquota, input_name='Aliquota'), namespace_, eol_))
+        if self.ValorLiquidoNfse is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorLiquidoNfse>%s</%sValorLiquidoNfse>%s' % (namespace_, self.gds_format_float(self.ValorLiquidoNfse, input_name='ValorLiquidoNfse'), namespace_, eol_))
+        if self.DescontoIncondicionado is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDescontoIncondicionado>%s</%sDescontoIncondicionado>%s' % (namespace_, self.gds_format_float(self.DescontoIncondicionado, input_name='DescontoIncondicionado'), namespace_, eol_))
+        if self.DescontoCondicionado is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDescontoCondicionado>%s</%sDescontoCondicionado>%s' % (namespace_, self.gds_format_float(self.DescontoCondicionado, input_name='DescontoCondicionado'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcValores'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1522,7 +1864,8 @@ class tcValores(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('DescontoCondicionado=%f,\n' % self.DescontoCondicionado)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1696,61 +2039,29 @@ class tcDadosServico(GeneratedsSuper):
     def set_Valores(self, Valores): self.Valores = Valores
     def get_ItemListaServico(self): return self.ItemListaServico
     def set_ItemListaServico(self, ItemListaServico): self.ItemListaServico = ItemListaServico
+    def get_CodigoCnae(self): return self.CodigoCnae
+    def set_CodigoCnae(self, CodigoCnae): self.CodigoCnae = CodigoCnae
+    def get_CodigoTributacaoMunicipio(self): return self.CodigoTributacaoMunicipio
+    def set_CodigoTributacaoMunicipio(self, CodigoTributacaoMunicipio): self.CodigoTributacaoMunicipio = CodigoTributacaoMunicipio
+    def get_Discriminacao(self): return self.Discriminacao
+    def set_Discriminacao(self, Discriminacao): self.Discriminacao = Discriminacao
+    def get_CodigoMunicipio(self): return self.CodigoMunicipio
+    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
     def validate_tsItemListaServico(self, value):
         # Validate type tsItemListaServico, a restriction on xsd:string.
         pass
-    def get_CodigoCnae(self): return self.CodigoCnae
-    def set_CodigoCnae(self, CodigoCnae): self.CodigoCnae = CodigoCnae
     def validate_tsCodigoCnae(self, value):
         # Validate type tsCodigoCnae, a restriction on xsd:int.
         pass
-    def get_CodigoTributacaoMunicipio(self): return self.CodigoTributacaoMunicipio
-    def set_CodigoTributacaoMunicipio(self, CodigoTributacaoMunicipio): self.CodigoTributacaoMunicipio = CodigoTributacaoMunicipio
     def validate_tsCodigoTributacao(self, value):
         # Validate type tsCodigoTributacao, a restriction on xsd:string.
         pass
-    def get_Discriminacao(self): return self.Discriminacao
-    def set_Discriminacao(self, Discriminacao): self.Discriminacao = Discriminacao
     def validate_tsDiscriminacao(self, value):
         # Validate type tsDiscriminacao, a restriction on xsd:string.
         pass
-    def get_CodigoMunicipio(self): return self.CodigoMunicipio
-    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
     def validate_tsCodigoMunicipioIbge(self, value):
         # Validate type tsCodigoMunicipioIbge, a restriction on xsd:int.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcDadosServico', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosServico')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosServico'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosServico', fromsubclass_=False):
-        if self.Valores is not None:
-            self.Valores.export(outfile, level, namespace_, name_='Valores', )
-        if self.ItemListaServico is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sItemListaServico>%s</%sItemListaServico>\n' % (namespace_, self.gds_format_string(quote_xml(self.ItemListaServico).encode(ExternalEncoding), input_name='ItemListaServico'), namespace_))
-        if self.CodigoCnae is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoCnae>%s</%sCodigoCnae>\n' % (namespace_, self.gds_format_integer(self.CodigoCnae, input_name='CodigoCnae'), namespace_))
-        if self.CodigoTributacaoMunicipio is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoTributacaoMunicipio>%s</%sCodigoTributacaoMunicipio>\n' % (namespace_, self.gds_format_string(quote_xml(self.CodigoTributacaoMunicipio).encode(ExternalEncoding), input_name='CodigoTributacaoMunicipio'), namespace_))
-        if self.Discriminacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDiscriminacao>%s</%sDiscriminacao>\n' % (namespace_, self.gds_format_string(quote_xml(self.Discriminacao).encode(ExternalEncoding), input_name='Discriminacao'), namespace_))
-        if self.CodigoMunicipio is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>\n' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_))
     def hasContent_(self):
         if (
             self.Valores is not None or
@@ -1759,13 +2070,54 @@ class tcDadosServico(GeneratedsSuper):
             self.CodigoTributacaoMunicipio is not None or
             self.Discriminacao is not None or
             self.CodigoMunicipio is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcDadosServico', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosServico')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosServico'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosServico', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Valores is not None:
+            self.Valores.export(outfile, level, namespace_, name_='Valores', pretty_print=pretty_print)
+        if self.ItemListaServico is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sItemListaServico>%s</%sItemListaServico>%s' % (namespace_, self.gds_format_string(quote_xml(self.ItemListaServico).encode(ExternalEncoding), input_name='ItemListaServico'), namespace_, eol_))
+        if self.CodigoCnae is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoCnae>%s</%sCodigoCnae>%s' % (namespace_, self.gds_format_integer(self.CodigoCnae, input_name='CodigoCnae'), namespace_, eol_))
+        if self.CodigoTributacaoMunicipio is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoTributacaoMunicipio>%s</%sCodigoTributacaoMunicipio>%s' % (namespace_, self.gds_format_string(quote_xml(self.CodigoTributacaoMunicipio).encode(ExternalEncoding), input_name='CodigoTributacaoMunicipio'), namespace_, eol_))
+        if self.Discriminacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDiscriminacao>%s</%sDiscriminacao>%s' % (namespace_, self.gds_format_string(quote_xml(self.Discriminacao).encode(ExternalEncoding), input_name='Discriminacao'), namespace_, eol_))
+        if self.CodigoMunicipio is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>%s' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcDadosServico'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1793,7 +2145,8 @@ class tcDadosServico(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('CodigoMunicipio=%d,\n' % self.CodigoMunicipio)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1803,7 +2156,7 @@ class tcDadosServico(GeneratedsSuper):
         if nodeName_ == 'Valores':
             obj_ = tcValores.factory()
             obj_.build(child_)
-            self.set_Valores(obj_)
+            self.Valores = obj_
         elif nodeName_ == 'ItemListaServico':
             ItemListaServico_ = child_.text
             ItemListaServico_ = self.gds_validate_string(ItemListaServico_, node, 'ItemListaServico')
@@ -1854,46 +2207,55 @@ class tcDadosConstrucaoCivil(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_CodigoObra(self): return self.CodigoObra
     def set_CodigoObra(self, CodigoObra): self.CodigoObra = CodigoObra
+    def get_Art(self): return self.Art
+    def set_Art(self, Art): self.Art = Art
     def validate_tsCodigoObra(self, value):
         # Validate type tsCodigoObra, a restriction on xsd:string.
         pass
-    def get_Art(self): return self.Art
-    def set_Art(self, Art): self.Art = Art
     def validate_tsArt(self, value):
         # Validate type tsArt, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcDadosConstrucaoCivil', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosConstrucaoCivil')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosConstrucaoCivil'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosConstrucaoCivil', fromsubclass_=False):
-        if self.CodigoObra is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoObra>%s</%sCodigoObra>\n' % (namespace_, self.gds_format_string(quote_xml(self.CodigoObra).encode(ExternalEncoding), input_name='CodigoObra'), namespace_))
-        if self.Art is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sArt>%s</%sArt>\n' % (namespace_, self.gds_format_string(quote_xml(self.Art).encode(ExternalEncoding), input_name='Art'), namespace_))
     def hasContent_(self):
         if (
             self.CodigoObra is not None or
             self.Art is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcDadosConstrucaoCivil', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosConstrucaoCivil')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosConstrucaoCivil'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosConstrucaoCivil', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.CodigoObra is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoObra>%s</%sCodigoObra>%s' % (namespace_, self.gds_format_string(quote_xml(self.CodigoObra).encode(ExternalEncoding), input_name='CodigoObra'), namespace_, eol_))
+        if self.Art is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sArt>%s</%sArt>%s' % (namespace_, self.gds_format_string(quote_xml(self.Art).encode(ExternalEncoding), input_name='Art'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcDadosConstrucaoCivil'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -1906,7 +2268,8 @@ class tcDadosConstrucaoCivil(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Art=%s,\n' % quote_python(self.Art).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -1945,45 +2308,18 @@ class tcDadosPrestador(GeneratedsSuper):
     def set_IdentificacaoPrestador(self, IdentificacaoPrestador): self.IdentificacaoPrestador = IdentificacaoPrestador
     def get_RazaoSocial(self): return self.RazaoSocial
     def set_RazaoSocial(self, RazaoSocial): self.RazaoSocial = RazaoSocial
-    def validate_tsRazaoSocial(self, value):
-        # Validate type tsRazaoSocial, a restriction on xsd:string.
-        pass
     def get_NomeFantasia(self): return self.NomeFantasia
     def set_NomeFantasia(self, NomeFantasia): self.NomeFantasia = NomeFantasia
-    def validate_tsNomeFantasia(self, value):
-        # Validate type tsNomeFantasia, a restriction on xsd:string.
-        pass
     def get_Endereco(self): return self.Endereco
     def set_Endereco(self, Endereco): self.Endereco = Endereco
     def get_Contato(self): return self.Contato
     def set_Contato(self, Contato): self.Contato = Contato
-    def export(self, outfile, level, namespace_='', name_='tcDadosPrestador', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosPrestador')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosPrestador'):
+    def validate_tsRazaoSocial(self, value):
+        # Validate type tsRazaoSocial, a restriction on xsd:string.
         pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosPrestador', fromsubclass_=False):
-        if self.IdentificacaoPrestador is not None:
-            self.IdentificacaoPrestador.export(outfile, level, namespace_, name_='IdentificacaoPrestador', )
-        if self.RazaoSocial is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>\n' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_))
-        if self.NomeFantasia is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNomeFantasia>%s</%sNomeFantasia>\n' % (namespace_, self.gds_format_string(quote_xml(self.NomeFantasia).encode(ExternalEncoding), input_name='NomeFantasia'), namespace_))
-        if self.Endereco is not None:
-            self.Endereco.export(outfile, level, namespace_, name_='Endereco', )
-        if self.Contato is not None:
-            self.Contato.export(outfile, level, namespace_, name_='Contato')
+    def validate_tsNomeFantasia(self, value):
+        # Validate type tsNomeFantasia, a restriction on xsd:string.
+        pass
     def hasContent_(self):
         if (
             self.IdentificacaoPrestador is not None or
@@ -1991,13 +2327,49 @@ class tcDadosPrestador(GeneratedsSuper):
             self.NomeFantasia is not None or
             self.Endereco is not None or
             self.Contato is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcDadosPrestador', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcDadosPrestador')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcDadosPrestador'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcDadosPrestador', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoPrestador is not None:
+            self.IdentificacaoPrestador.export(outfile, level, namespace_, name_='IdentificacaoPrestador', pretty_print=pretty_print)
+        if self.RazaoSocial is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sRazaoSocial>%s</%sRazaoSocial>%s' % (namespace_, self.gds_format_string(quote_xml(self.RazaoSocial).encode(ExternalEncoding), input_name='RazaoSocial'), namespace_, eol_))
+        if self.NomeFantasia is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNomeFantasia>%s</%sNomeFantasia>%s' % (namespace_, self.gds_format_string(quote_xml(self.NomeFantasia).encode(ExternalEncoding), input_name='NomeFantasia'), namespace_, eol_))
+        if self.Endereco is not None:
+            self.Endereco.export(outfile, level, namespace_, name_='Endereco', pretty_print=pretty_print)
+        if self.Contato is not None:
+            self.Contato.export(outfile, level, namespace_, name_='Contato', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcDadosPrestador'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -2028,7 +2400,8 @@ class tcDadosPrestador(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -2038,7 +2411,7 @@ class tcDadosPrestador(GeneratedsSuper):
         if nodeName_ == 'IdentificacaoPrestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_IdentificacaoPrestador(obj_)
+            self.IdentificacaoPrestador = obj_
         elif nodeName_ == 'RazaoSocial':
             RazaoSocial_ = child_.text
             RazaoSocial_ = self.gds_validate_string(RazaoSocial_, node, 'RazaoSocial')
@@ -2052,21 +2425,25 @@ class tcDadosPrestador(GeneratedsSuper):
         elif nodeName_ == 'Endereco':
             obj_ = tcEndereco.factory()
             obj_.build(child_)
-            self.set_Endereco(obj_)
+            self.Endereco = obj_
         elif nodeName_ == 'Contato':
             obj_ = tcContato.factory()
             obj_.build(child_)
-            self.set_Contato(obj_)
+            self.Contato = obj_
 # end class tcDadosPrestador
 
 
 class tcInfRps(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, IdentificacaoRps=None, DataEmissao=None, NaturezaOperacao=None, RegimeEspecialTributacao=None, OptanteSimplesNacional=None, IncentivadorCultural=None, Status=None, RpsSubstituido=None, Servico=None, Prestador=None, Tomador=None, IntermediarioServico=None, ContrucaoCivil=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, IdentificacaoRps=None, DataEmissao=None, NaturezaOperacao=None, RegimeEspecialTributacao=None, OptanteSimplesNacional=None, IncentivadorCultural=None, Status=None, RpsSubstituido=None, Servico=None, Prestador=None, Tomador=None, IntermediarioServico=None, ConstrucaoCivil=None):
+        self.Id = _cast(None, Id)
         self.IdentificacaoRps = IdentificacaoRps
-        self.DataEmissao = DataEmissao
+        if isinstance(DataEmissao, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataEmissao, '%Y-%m-%dT%H:%M:%S')
+        else:
+            initvalue_ = DataEmissao
+        self.DataEmissao = initvalue_
         self.NaturezaOperacao = NaturezaOperacao
         self.RegimeEspecialTributacao = RegimeEspecialTributacao
         self.OptanteSimplesNacional = OptanteSimplesNacional
@@ -2077,7 +2454,7 @@ class tcInfRps(GeneratedsSuper):
         self.Prestador = Prestador
         self.Tomador = Tomador
         self.IntermediarioServico = IntermediarioServico
-        self.ContrucaoCivil = ContrucaoCivil
+        self.ConstrucaoCivil = ConstrucaoCivil
     def factory(*args_, **kwargs_):
         if tcInfRps.subclass:
             return tcInfRps.subclass(*args_, **kwargs_)
@@ -2090,26 +2467,14 @@ class tcInfRps(GeneratedsSuper):
     def set_DataEmissao(self, DataEmissao): self.DataEmissao = DataEmissao
     def get_NaturezaOperacao(self): return self.NaturezaOperacao
     def set_NaturezaOperacao(self, NaturezaOperacao): self.NaturezaOperacao = NaturezaOperacao
-    def validate_tsNaturezaOperacao(self, value):
-        # Validate type tsNaturezaOperacao, a restriction on xsd:byte.
-        pass
     def get_RegimeEspecialTributacao(self): return self.RegimeEspecialTributacao
     def set_RegimeEspecialTributacao(self, RegimeEspecialTributacao): self.RegimeEspecialTributacao = RegimeEspecialTributacao
-    def validate_tsRegimeEspecialTributacao(self, value):
-        # Validate type tsRegimeEspecialTributacao, a restriction on xsd:byte.
-        pass
     def get_OptanteSimplesNacional(self): return self.OptanteSimplesNacional
     def set_OptanteSimplesNacional(self, OptanteSimplesNacional): self.OptanteSimplesNacional = OptanteSimplesNacional
-    def validate_tsSimNao(self, value):
-        # Validate type tsSimNao, a restriction on xsd:byte.
-        pass
     def get_IncentivadorCultural(self): return self.IncentivadorCultural
     def set_IncentivadorCultural(self, IncentivadorCultural): self.IncentivadorCultural = IncentivadorCultural
     def get_Status(self): return self.Status
     def set_Status(self, Status): self.Status = Status
-    def validate_tsStatusRps(self, value):
-        # Validate type tsStatusRps, a restriction on xsd:byte.
-        pass
     def get_RpsSubstituido(self): return self.RpsSubstituido
     def set_RpsSubstituido(self, RpsSubstituido): self.RpsSubstituido = RpsSubstituido
     def get_Servico(self): return self.Servico
@@ -2120,62 +2485,25 @@ class tcInfRps(GeneratedsSuper):
     def set_Tomador(self, Tomador): self.Tomador = Tomador
     def get_IntermediarioServico(self): return self.IntermediarioServico
     def set_IntermediarioServico(self, IntermediarioServico): self.IntermediarioServico = IntermediarioServico
-    def get_ContrucaoCivil(self): return self.ContrucaoCivil
-    def set_ContrucaoCivil(self, ContrucaoCivil): self.ContrucaoCivil = ContrucaoCivil
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
+    def get_ConstrucaoCivil(self): return self.ConstrucaoCivil
+    def set_ConstrucaoCivil(self, ConstrucaoCivil): self.ConstrucaoCivil = ConstrucaoCivil
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
+    def validate_tsNaturezaOperacao(self, value):
+        # Validate type tsNaturezaOperacao, a restriction on xsd:byte.
+        pass
+    def validate_tsRegimeEspecialTributacao(self, value):
+        # Validate type tsRegimeEspecialTributacao, a restriction on xsd:byte.
+        pass
+    def validate_tsSimNao(self, value):
+        # Validate type tsSimNao, a restriction on xsd:byte.
+        pass
+    def validate_tsStatusRps(self, value):
+        # Validate type tsStatusRps, a restriction on xsd:byte.
+        pass
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcInfRps', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfRps')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfRps'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcInfRps', fromsubclass_=False):
-        if self.IdentificacaoRps is not None:
-            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', )
-        if self.DataEmissao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataEmissao>%s</%sDataEmissao>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataEmissao).encode(ExternalEncoding), input_name='DataEmissao'), namespace_))
-        if self.NaturezaOperacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNaturezaOperacao>%s</%sNaturezaOperacao>\n' % (namespace_, self.gds_format_integer(self.NaturezaOperacao, input_name='NaturezaOperacao'), namespace_))
-        if self.RegimeEspecialTributacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sRegimeEspecialTributacao>%s</%sRegimeEspecialTributacao>\n' % (namespace_, self.gds_format_integer(self.RegimeEspecialTributacao, input_name='RegimeEspecialTributacao'), namespace_))
-        if self.OptanteSimplesNacional is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sOptanteSimplesNacional>%s</%sOptanteSimplesNacional>\n' % (namespace_, self.gds_format_integer(self.OptanteSimplesNacional, input_name='OptanteSimplesNacional'), namespace_))
-        if self.IncentivadorCultural is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sIncentivadorCultural>%s</%sIncentivadorCultural>\n' % (namespace_, self.gds_format_integer(self.IncentivadorCultural, input_name='IncentivadorCultural'), namespace_))
-        if self.Status is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sStatus>%s</%sStatus>\n' % (namespace_, self.gds_format_integer(self.Status, input_name='Status'), namespace_))
-        if self.RpsSubstituido is not None:
-            self.RpsSubstituido.export(outfile, level, namespace_, name_='RpsSubstituido')
-        if self.Servico is not None:
-            self.Servico.export(outfile, level, namespace_, name_='Servico', )
-        if self.Prestador is not None:
-            self.Prestador.export(outfile, level, namespace_, name_='Prestador', )
-        if self.Tomador is not None:
-            self.Tomador.export(outfile, level, namespace_, name_='Tomador')
-        if self.IntermediarioServico is not None:
-            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico')
-        if self.ContrucaoCivil is not None:
-            self.ContrucaoCivil.export(outfile, level, namespace_, name_='ContrucaoCivil')
     def hasContent_(self):
         if (
             self.IdentificacaoRps is not None or
@@ -2190,21 +2518,79 @@ class tcInfRps(GeneratedsSuper):
             self.Prestador is not None or
             self.Tomador is not None or
             self.IntermediarioServico is not None or
-            self.ContrucaoCivil is not None
-            ):
+            self.ConstrucaoCivil is not None
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcInfRps', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfRps')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfRps'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcInfRps', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoRps is not None:
+            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', pretty_print=pretty_print)
+        if self.DataEmissao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataEmissao>%s</%sDataEmissao>%s' % (namespace_, self.gds_format_datetime(self.DataEmissao, input_name='DataEmissao'), namespace_, eol_))
+        if self.NaturezaOperacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNaturezaOperacao>%s</%sNaturezaOperacao>%s' % (namespace_, self.gds_format_integer(self.NaturezaOperacao, input_name='NaturezaOperacao'), namespace_, eol_))
+        if self.RegimeEspecialTributacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sRegimeEspecialTributacao>%s</%sRegimeEspecialTributacao>%s' % (namespace_, self.gds_format_integer(self.RegimeEspecialTributacao, input_name='RegimeEspecialTributacao'), namespace_, eol_))
+        if self.OptanteSimplesNacional is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sOptanteSimplesNacional>%s</%sOptanteSimplesNacional>%s' % (namespace_, self.gds_format_integer(self.OptanteSimplesNacional, input_name='OptanteSimplesNacional'), namespace_, eol_))
+        if self.IncentivadorCultural is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sIncentivadorCultural>%s</%sIncentivadorCultural>%s' % (namespace_, self.gds_format_integer(self.IncentivadorCultural, input_name='IncentivadorCultural'), namespace_, eol_))
+        if self.Status is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sStatus>%s</%sStatus>%s' % (namespace_, self.gds_format_integer(self.Status, input_name='Status'), namespace_, eol_))
+        if self.RpsSubstituido is not None:
+            self.RpsSubstituido.export(outfile, level, namespace_, name_='RpsSubstituido', pretty_print=pretty_print)
+        if self.Servico is not None:
+            self.Servico.export(outfile, level, namespace_, name_='Servico', pretty_print=pretty_print)
+        if self.Prestador is not None:
+            self.Prestador.export(outfile, level, namespace_, name_='Prestador', pretty_print=pretty_print)
+        if self.Tomador is not None:
+            self.Tomador.export(outfile, level, namespace_, name_='Tomador', pretty_print=pretty_print)
+        if self.IntermediarioServico is not None:
+            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico', pretty_print=pretty_print)
+        if self.ConstrucaoCivil is not None:
+            self.ConstrucaoCivil.export(outfile, level, namespace_, name_='ConstrucaoCivil', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcInfRps'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.IdentificacaoRps is not None:
             showIndent(outfile, level)
@@ -2214,7 +2600,7 @@ class tcInfRps(GeneratedsSuper):
             outfile.write('),\n')
         if self.DataEmissao is not None:
             showIndent(outfile, level)
-            outfile.write('DataEmissao=%s,\n' % quote_python(self.DataEmissao).encode(ExternalEncoding))
+            outfile.write('DataEmissao=model_.GeneratedsSuper.gds_parse_datetime("%s"),\n' % self.gds_format_datetime(self.DataEmissao, input_name='DataEmissao'))
         if self.NaturezaOperacao is not None:
             showIndent(outfile, level)
             outfile.write('NaturezaOperacao=%d,\n' % self.NaturezaOperacao)
@@ -2260,32 +2646,33 @@ class tcInfRps(GeneratedsSuper):
             self.IntermediarioServico.exportLiteral(outfile, level, name_='IntermediarioServico')
             showIndent(outfile, level)
             outfile.write('),\n')
-        if self.ContrucaoCivil is not None:
+        if self.ConstrucaoCivil is not None:
             showIndent(outfile, level)
-            outfile.write('ContrucaoCivil=model_.tcDadosConstrucaoCivil(\n')
-            self.ContrucaoCivil.exportLiteral(outfile, level, name_='ContrucaoCivil')
+            outfile.write('ConstrucaoCivil=model_.tcDadosConstrucaoCivil(\n')
+            self.ConstrucaoCivil.exportLiteral(outfile, level, name_='ConstrucaoCivil')
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'IdentificacaoRps':
             obj_ = tcIdentificacaoRps.factory()
             obj_.build(child_)
-            self.set_IdentificacaoRps(obj_)
+            self.IdentificacaoRps = obj_
         elif nodeName_ == 'DataEmissao':
-            DataEmissao_ = child_.text
-            DataEmissao_ = self.gds_validate_string(DataEmissao_, node, 'DataEmissao')
-            self.DataEmissao = DataEmissao_
+            sval_ = child_.text
+            dval_ = self.gds_parse_datetime(sval_)
+            self.DataEmissao = dval_
         elif nodeName_ == 'NaturezaOperacao':
             sval_ = child_.text
             try:
@@ -2334,27 +2721,27 @@ class tcInfRps(GeneratedsSuper):
         elif nodeName_ == 'RpsSubstituido':
             obj_ = tcIdentificacaoRps.factory()
             obj_.build(child_)
-            self.set_RpsSubstituido(obj_)
+            self.RpsSubstituido = obj_
         elif nodeName_ == 'Servico':
             obj_ = tcDadosServico.factory()
             obj_.build(child_)
-            self.set_Servico(obj_)
+            self.Servico = obj_
         elif nodeName_ == 'Prestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_Prestador(obj_)
+            self.Prestador = obj_
         elif nodeName_ == 'Tomador':
             obj_ = tcDadosTomador.factory()
             obj_.build(child_)
-            self.set_Tomador(obj_)
+            self.Tomador = obj_
         elif nodeName_ == 'IntermediarioServico':
             obj_ = tcIdentificacaoIntermediarioServico.factory()
             obj_.build(child_)
-            self.set_IntermediarioServico(obj_)
-        elif nodeName_ == 'ContrucaoCivil':
+            self.IntermediarioServico = obj_
+        elif nodeName_ == 'ConstrucaoCivil':
             obj_ = tcDadosConstrucaoCivil.factory()
             obj_.build(child_)
-            self.set_ContrucaoCivil(obj_)
+            self.ConstrucaoCivil = obj_
 # end class tcInfRps
 
 
@@ -2374,36 +2761,45 @@ class tcRps(GeneratedsSuper):
     def set_InfRps(self, InfRps): self.InfRps = InfRps
     def get_Signature(self): return self.Signature
     def set_Signature(self, Signature): self.Signature = Signature
-    def export(self, outfile, level, namespace_='', name_='tcRps', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcRps')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcRps'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcRps', fromsubclass_=False):
-        if self.InfRps is not None:
-            self.InfRps.export(outfile, level, namespace_, name_='InfRps', )
-        if self.Signature is not None:
-            self.Signature.export(outfile, level, namespace_, name_='Signature')
     def hasContent_(self):
         if (
             self.InfRps is not None or
             self.Signature is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcRps', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcRps')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcRps'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcRps', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.InfRps is not None:
+            self.InfRps.export(outfile, level, namespace_, name_='InfRps', pretty_print=pretty_print)
+        if self.Signature is not None:
+            self.Signature.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcRps'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -2422,7 +2818,8 @@ class tcRps(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -2432,11 +2829,11 @@ class tcRps(GeneratedsSuper):
         if nodeName_ == 'InfRps':
             obj_ = tcInfRps.factory()
             obj_.build(child_)
-            self.set_InfRps(obj_)
+            self.InfRps = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
-            self.set_Signature(obj_)
+            self.Signature = obj_
 # end class tcRps
 
 
@@ -2456,64 +2853,73 @@ class tcIdentificacaoNfse(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Numero(self): return self.Numero
     def set_Numero(self, Numero): self.Numero = Numero
+    def get_Cnpj(self): return self.Cnpj
+    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
+    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
+    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
+    def get_CodigoMunicipio(self): return self.CodigoMunicipio
+    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
     def validate_tsNumeroNfse(self, value):
         # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
         pass
-    def get_Cnpj(self): return self.Cnpj
-    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
     def validate_tsCnpj(self, value):
         # Validate type tsCnpj, a restriction on xsd:string.
         pass
-    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
-    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
     def validate_tsInscricaoMunicipal(self, value):
         # Validate type tsInscricaoMunicipal, a restriction on xsd:string.
         pass
-    def get_CodigoMunicipio(self): return self.CodigoMunicipio
-    def set_CodigoMunicipio(self, CodigoMunicipio): self.CodigoMunicipio = CodigoMunicipio
     def validate_tsCodigoMunicipioIbge(self, value):
         # Validate type tsCodigoMunicipioIbge, a restriction on xsd:int.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoNfse'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoNfse', fromsubclass_=False):
-        if self.Numero is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumero>%s</%sNumero>\n' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_))
-        if self.Cnpj is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCnpj>%s</%sCnpj>\n' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_))
-        if self.InscricaoMunicipal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>\n' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_))
-        if self.CodigoMunicipio is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>\n' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_))
     def hasContent_(self):
         if (
             self.Numero is not None or
             self.Cnpj is not None or
             self.InscricaoMunicipal is not None or
             self.CodigoMunicipio is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcIdentificacaoNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcIdentificacaoNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcIdentificacaoNfse'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcIdentificacaoNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Numero is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumero>%s</%sNumero>%s' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_, eol_))
+        if self.Cnpj is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCnpj>%s</%sCnpj>%s' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_, eol_))
+        if self.InscricaoMunicipal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>%s' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_, eol_))
+        if self.CodigoMunicipio is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoMunicipio>%s</%sCodigoMunicipio>%s' % (namespace_, self.gds_format_integer(self.CodigoMunicipio, input_name='CodigoMunicipio'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcIdentificacaoNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -2532,7 +2938,8 @@ class tcIdentificacaoNfse(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('CodigoMunicipio=%d,\n' % self.CodigoMunicipio)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -2575,18 +2982,30 @@ class tcIdentificacaoNfse(GeneratedsSuper):
 class tcInfNfse(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, Numero=None, CodigoVerificacao=None, DataEmissao=None, IdentificacaoRps=None, DataEmissaoRps=None, NaturezaOperacao=None, RegimeEspecialTributacao=None, OptanteSimplesNacional=None, IncentivadorCultural=None, Competencia=None, NfseSubstituida=None, OutrasInformacoes=None, Servico=None, ValorCredito=None, PrestadorServico=None, TomadorServico=None, IntermediarioServico=None, OrgaoGerador=None, ContrucaoCivil=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, Numero=None, CodigoVerificacao=None, DataEmissao=None, IdentificacaoRps=None, DataEmissaoRps=None, NaturezaOperacao=None, RegimeEspecialTributacao=None, OptanteSimplesNacional=None, IncentivadorCultural=None, Competencia=None, NfseSubstituida=None, OutrasInformacoes=None, Servico=None, ValorCredito=None, PrestadorServico=None, TomadorServico=None, IntermediarioServico=None, OrgaoGerador=None, ConstrucaoCivil=None):
+        self.Id = _cast(None, Id)
         self.Numero = Numero
         self.CodigoVerificacao = CodigoVerificacao
-        self.DataEmissao = DataEmissao
+        if isinstance(DataEmissao, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataEmissao, '%Y-%m-%dT%H:%M:%S')
+        else:
+            initvalue_ = DataEmissao
+        self.DataEmissao = initvalue_
         self.IdentificacaoRps = IdentificacaoRps
-        self.DataEmissaoRps = DataEmissaoRps
+        if isinstance(DataEmissaoRps, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataEmissaoRps, '%Y-%m-%d').date()
+        else:
+            initvalue_ = DataEmissaoRps
+        self.DataEmissaoRps = initvalue_
         self.NaturezaOperacao = NaturezaOperacao
         self.RegimeEspecialTributacao = RegimeEspecialTributacao
         self.OptanteSimplesNacional = OptanteSimplesNacional
         self.IncentivadorCultural = IncentivadorCultural
-        self.Competencia = Competencia
+        if isinstance(Competencia, basestring):
+            initvalue_ = datetime_.datetime.strptime(Competencia, '%Y-%m-%dT%H:%M:%S')
+        else:
+            initvalue_ = Competencia
+        self.Competencia = initvalue_
         self.NfseSubstituida = NfseSubstituida
         self.OutrasInformacoes = OutrasInformacoes
         self.Servico = Servico
@@ -2595,7 +3014,7 @@ class tcInfNfse(GeneratedsSuper):
         self.TomadorServico = TomadorServico
         self.IntermediarioServico = IntermediarioServico
         self.OrgaoGerador = OrgaoGerador
-        self.ContrucaoCivil = ContrucaoCivil
+        self.ConstrucaoCivil = ConstrucaoCivil
     def factory(*args_, **kwargs_):
         if tcInfNfse.subclass:
             return tcInfNfse.subclass(*args_, **kwargs_)
@@ -2604,14 +3023,8 @@ class tcInfNfse(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Numero(self): return self.Numero
     def set_Numero(self, Numero): self.Numero = Numero
-    def validate_tsNumeroNfse(self, value):
-        # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
-        pass
     def get_CodigoVerificacao(self): return self.CodigoVerificacao
     def set_CodigoVerificacao(self, CodigoVerificacao): self.CodigoVerificacao = CodigoVerificacao
-    def validate_tsCodigoVerificacao(self, value):
-        # Validate type tsCodigoVerificacao, a restriction on xsd:string.
-        pass
     def get_DataEmissao(self): return self.DataEmissao
     def set_DataEmissao(self, DataEmissao): self.DataEmissao = DataEmissao
     def get_IdentificacaoRps(self): return self.IdentificacaoRps
@@ -2620,19 +3033,10 @@ class tcInfNfse(GeneratedsSuper):
     def set_DataEmissaoRps(self, DataEmissaoRps): self.DataEmissaoRps = DataEmissaoRps
     def get_NaturezaOperacao(self): return self.NaturezaOperacao
     def set_NaturezaOperacao(self, NaturezaOperacao): self.NaturezaOperacao = NaturezaOperacao
-    def validate_tsNaturezaOperacao(self, value):
-        # Validate type tsNaturezaOperacao, a restriction on xsd:byte.
-        pass
     def get_RegimeEspecialTributacao(self): return self.RegimeEspecialTributacao
     def set_RegimeEspecialTributacao(self, RegimeEspecialTributacao): self.RegimeEspecialTributacao = RegimeEspecialTributacao
-    def validate_tsRegimeEspecialTributacao(self, value):
-        # Validate type tsRegimeEspecialTributacao, a restriction on xsd:byte.
-        pass
     def get_OptanteSimplesNacional(self): return self.OptanteSimplesNacional
     def set_OptanteSimplesNacional(self, OptanteSimplesNacional): self.OptanteSimplesNacional = OptanteSimplesNacional
-    def validate_tsSimNao(self, value):
-        # Validate type tsSimNao, a restriction on xsd:byte.
-        pass
     def get_IncentivadorCultural(self): return self.IncentivadorCultural
     def set_IncentivadorCultural(self, IncentivadorCultural): self.IncentivadorCultural = IncentivadorCultural
     def get_Competencia(self): return self.Competencia
@@ -2641,16 +3045,10 @@ class tcInfNfse(GeneratedsSuper):
     def set_NfseSubstituida(self, NfseSubstituida): self.NfseSubstituida = NfseSubstituida
     def get_OutrasInformacoes(self): return self.OutrasInformacoes
     def set_OutrasInformacoes(self, OutrasInformacoes): self.OutrasInformacoes = OutrasInformacoes
-    def validate_tsOutrasInformacoes(self, value):
-        # Validate type tsOutrasInformacoes, a restriction on xsd:string.
-        pass
     def get_Servico(self): return self.Servico
     def set_Servico(self, Servico): self.Servico = Servico
     def get_ValorCredito(self): return self.ValorCredito
     def set_ValorCredito(self, ValorCredito): self.ValorCredito = ValorCredito
-    def validate_tsValor(self, value):
-        # Validate type tsValor, a restriction on xsd:decimal.
-        pass
     def get_PrestadorServico(self): return self.PrestadorServico
     def set_PrestadorServico(self, PrestadorServico): self.PrestadorServico = PrestadorServico
     def get_TomadorServico(self): return self.TomadorServico
@@ -2659,80 +3057,34 @@ class tcInfNfse(GeneratedsSuper):
     def set_IntermediarioServico(self, IntermediarioServico): self.IntermediarioServico = IntermediarioServico
     def get_OrgaoGerador(self): return self.OrgaoGerador
     def set_OrgaoGerador(self, OrgaoGerador): self.OrgaoGerador = OrgaoGerador
-    def get_ContrucaoCivil(self): return self.ContrucaoCivil
-    def set_ContrucaoCivil(self, ContrucaoCivil): self.ContrucaoCivil = ContrucaoCivil
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
+    def get_ConstrucaoCivil(self): return self.ConstrucaoCivil
+    def set_ConstrucaoCivil(self, ConstrucaoCivil): self.ConstrucaoCivil = ConstrucaoCivil
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
+    def validate_tsNumeroNfse(self, value):
+        # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
+        pass
+    def validate_tsCodigoVerificacao(self, value):
+        # Validate type tsCodigoVerificacao, a restriction on xsd:string.
+        pass
+    def validate_tsNaturezaOperacao(self, value):
+        # Validate type tsNaturezaOperacao, a restriction on xsd:byte.
+        pass
+    def validate_tsRegimeEspecialTributacao(self, value):
+        # Validate type tsRegimeEspecialTributacao, a restriction on xsd:byte.
+        pass
+    def validate_tsSimNao(self, value):
+        # Validate type tsSimNao, a restriction on xsd:byte.
+        pass
+    def validate_tsOutrasInformacoes(self, value):
+        # Validate type tsOutrasInformacoes, a restriction on xsd:string.
+        pass
+    def validate_tsValor(self, value):
+        # Validate type tsValor, a restriction on xsd:decimal.
+        pass
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcInfNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfNfse'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcInfNfse', fromsubclass_=False):
-        if self.Numero is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumero>%s</%sNumero>\n' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_))
-        if self.CodigoVerificacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoVerificacao>%s</%sCodigoVerificacao>\n' % (namespace_, self.gds_format_string(quote_xml(self.CodigoVerificacao).encode(ExternalEncoding), input_name='CodigoVerificacao'), namespace_))
-        if self.DataEmissao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataEmissao>%s</%sDataEmissao>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataEmissao).encode(ExternalEncoding), input_name='DataEmissao'), namespace_))
-        if self.IdentificacaoRps is not None:
-            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps')
-        if self.DataEmissaoRps is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataEmissaoRps>%s</%sDataEmissaoRps>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataEmissaoRps).encode(ExternalEncoding), input_name='DataEmissaoRps'), namespace_))
-        if self.NaturezaOperacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNaturezaOperacao>%s</%sNaturezaOperacao>\n' % (namespace_, self.gds_format_integer(self.NaturezaOperacao, input_name='NaturezaOperacao'), namespace_))
-        if self.RegimeEspecialTributacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sRegimeEspecialTributacao>%s</%sRegimeEspecialTributacao>\n' % (namespace_, self.gds_format_integer(self.RegimeEspecialTributacao, input_name='RegimeEspecialTributacao'), namespace_))
-        if self.OptanteSimplesNacional is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sOptanteSimplesNacional>%s</%sOptanteSimplesNacional>\n' % (namespace_, self.gds_format_integer(self.OptanteSimplesNacional, input_name='OptanteSimplesNacional'), namespace_))
-        if self.IncentivadorCultural is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sIncentivadorCultural>%s</%sIncentivadorCultural>\n' % (namespace_, self.gds_format_integer(self.IncentivadorCultural, input_name='IncentivadorCultural'), namespace_))
-        if self.Competencia is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCompetencia>%s</%sCompetencia>\n' % (namespace_, self.gds_format_string(quote_xml(self.Competencia).encode(ExternalEncoding), input_name='Competencia'), namespace_))
-        if self.NfseSubstituida is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNfseSubstituida>%s</%sNfseSubstituida>\n' % (namespace_, self.gds_format_integer(self.NfseSubstituida, input_name='NfseSubstituida'), namespace_))
-        if self.OutrasInformacoes is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sOutrasInformacoes>%s</%sOutrasInformacoes>\n' % (namespace_, self.gds_format_string(quote_xml(self.OutrasInformacoes).encode(ExternalEncoding), input_name='OutrasInformacoes'), namespace_))
-        if self.Servico is not None:
-            self.Servico.export(outfile, level, namespace_, name_='Servico', )
-        if self.ValorCredito is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sValorCredito>%s</%sValorCredito>\n' % (namespace_, self.gds_format_float(self.ValorCredito, input_name='ValorCredito'), namespace_))
-        if self.PrestadorServico is not None:
-            self.PrestadorServico.export(outfile, level, namespace_, name_='PrestadorServico', )
-        if self.TomadorServico is not None:
-            self.TomadorServico.export(outfile, level, namespace_, name_='TomadorServico')
-        if self.IntermediarioServico is not None:
-            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico')
-        if self.OrgaoGerador is not None:
-            self.OrgaoGerador.export(outfile, level, namespace_, name_='OrgaoGerador', )
-        if self.ContrucaoCivil is not None:
-            self.ContrucaoCivil.export(outfile, level, namespace_, name_='ContrucaoCivil')
     def hasContent_(self):
         if (
             self.Numero is not None or
@@ -2753,21 +3105,97 @@ class tcInfNfse(GeneratedsSuper):
             self.TomadorServico is not None or
             self.IntermediarioServico is not None or
             self.OrgaoGerador is not None or
-            self.ContrucaoCivil is not None
-            ):
+            self.ConstrucaoCivil is not None
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcInfNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfNfse'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcInfNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Numero is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumero>%s</%sNumero>%s' % (namespace_, self.gds_format_integer(self.Numero, input_name='Numero'), namespace_, eol_))
+        if self.CodigoVerificacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoVerificacao>%s</%sCodigoVerificacao>%s' % (namespace_, self.gds_format_string(quote_xml(self.CodigoVerificacao).encode(ExternalEncoding), input_name='CodigoVerificacao'), namespace_, eol_))
+        if self.DataEmissao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataEmissao>%s</%sDataEmissao>%s' % (namespace_, self.gds_format_datetime(self.DataEmissao, input_name='DataEmissao'), namespace_, eol_))
+        if self.IdentificacaoRps is not None:
+            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', pretty_print=pretty_print)
+        if self.DataEmissaoRps is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataEmissaoRps>%s</%sDataEmissaoRps>%s' % (namespace_, self.gds_format_date(self.DataEmissaoRps, input_name='DataEmissaoRps'), namespace_, eol_))
+        if self.NaturezaOperacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNaturezaOperacao>%s</%sNaturezaOperacao>%s' % (namespace_, self.gds_format_integer(self.NaturezaOperacao, input_name='NaturezaOperacao'), namespace_, eol_))
+        if self.RegimeEspecialTributacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sRegimeEspecialTributacao>%s</%sRegimeEspecialTributacao>%s' % (namespace_, self.gds_format_integer(self.RegimeEspecialTributacao, input_name='RegimeEspecialTributacao'), namespace_, eol_))
+        if self.OptanteSimplesNacional is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sOptanteSimplesNacional>%s</%sOptanteSimplesNacional>%s' % (namespace_, self.gds_format_integer(self.OptanteSimplesNacional, input_name='OptanteSimplesNacional'), namespace_, eol_))
+        if self.IncentivadorCultural is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sIncentivadorCultural>%s</%sIncentivadorCultural>%s' % (namespace_, self.gds_format_integer(self.IncentivadorCultural, input_name='IncentivadorCultural'), namespace_, eol_))
+        if self.Competencia is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCompetencia>%s</%sCompetencia>%s' % (namespace_, self.gds_format_datetime(self.Competencia, input_name='Competencia'), namespace_, eol_))
+        if self.NfseSubstituida is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNfseSubstituida>%s</%sNfseSubstituida>%s' % (namespace_, self.gds_format_integer(self.NfseSubstituida, input_name='NfseSubstituida'), namespace_, eol_))
+        if self.OutrasInformacoes is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sOutrasInformacoes>%s</%sOutrasInformacoes>%s' % (namespace_, self.gds_format_string(quote_xml(self.OutrasInformacoes).encode(ExternalEncoding), input_name='OutrasInformacoes'), namespace_, eol_))
+        if self.Servico is not None:
+            self.Servico.export(outfile, level, namespace_, name_='Servico', pretty_print=pretty_print)
+        if self.ValorCredito is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sValorCredito>%s</%sValorCredito>%s' % (namespace_, self.gds_format_float(self.ValorCredito, input_name='ValorCredito'), namespace_, eol_))
+        if self.PrestadorServico is not None:
+            self.PrestadorServico.export(outfile, level, namespace_, name_='PrestadorServico', pretty_print=pretty_print)
+        if self.TomadorServico is not None:
+            self.TomadorServico.export(outfile, level, namespace_, name_='TomadorServico', pretty_print=pretty_print)
+        if self.IntermediarioServico is not None:
+            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico', pretty_print=pretty_print)
+        if self.OrgaoGerador is not None:
+            self.OrgaoGerador.export(outfile, level, namespace_, name_='OrgaoGerador', pretty_print=pretty_print)
+        if self.ConstrucaoCivil is not None:
+            self.ConstrucaoCivil.export(outfile, level, namespace_, name_='ConstrucaoCivil', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcInfNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.Numero is not None:
             showIndent(outfile, level)
@@ -2777,7 +3205,7 @@ class tcInfNfse(GeneratedsSuper):
             outfile.write('CodigoVerificacao=%s,\n' % quote_python(self.CodigoVerificacao).encode(ExternalEncoding))
         if self.DataEmissao is not None:
             showIndent(outfile, level)
-            outfile.write('DataEmissao=%s,\n' % quote_python(self.DataEmissao).encode(ExternalEncoding))
+            outfile.write('DataEmissao=model_.GeneratedsSuper.gds_parse_datetime("%s"),\n' % self.gds_format_datetime(self.DataEmissao, input_name='DataEmissao'))
         if self.IdentificacaoRps is not None:
             showIndent(outfile, level)
             outfile.write('IdentificacaoRps=model_.tcIdentificacaoRps(\n')
@@ -2786,7 +3214,7 @@ class tcInfNfse(GeneratedsSuper):
             outfile.write('),\n')
         if self.DataEmissaoRps is not None:
             showIndent(outfile, level)
-            outfile.write('DataEmissaoRps=%s,\n' % quote_python(self.DataEmissaoRps).encode(ExternalEncoding))
+            outfile.write('DataEmissaoRps=model_.GeneratedsSuper.gds_parse_date("%s"),\n' % self.gds_format_date(self.DataEmissaoRps, input_name='DataEmissaoRps'))
         if self.NaturezaOperacao is not None:
             showIndent(outfile, level)
             outfile.write('NaturezaOperacao=%d,\n' % self.NaturezaOperacao)
@@ -2801,7 +3229,7 @@ class tcInfNfse(GeneratedsSuper):
             outfile.write('IncentivadorCultural=%d,\n' % self.IncentivadorCultural)
         if self.Competencia is not None:
             showIndent(outfile, level)
-            outfile.write('Competencia=%s,\n' % quote_python(self.Competencia).encode(ExternalEncoding))
+            outfile.write('Competencia=model_.GeneratedsSuper.gds_parse_datetime("%s"),\n' % self.gds_format_datetime(self.Competencia, input_name='Competencia'))
         if self.NfseSubstituida is not None:
             showIndent(outfile, level)
             outfile.write('NfseSubstituida=%d,\n' % self.NfseSubstituida)
@@ -2841,23 +3269,24 @@ class tcInfNfse(GeneratedsSuper):
             self.OrgaoGerador.exportLiteral(outfile, level, name_='OrgaoGerador')
             showIndent(outfile, level)
             outfile.write('),\n')
-        if self.ContrucaoCivil is not None:
+        if self.ConstrucaoCivil is not None:
             showIndent(outfile, level)
-            outfile.write('ContrucaoCivil=model_.tcDadosConstrucaoCivil(\n')
-            self.ContrucaoCivil.exportLiteral(outfile, level, name_='ContrucaoCivil')
+            outfile.write('ConstrucaoCivil=model_.tcDadosConstrucaoCivil(\n')
+            self.ConstrucaoCivil.exportLiteral(outfile, level, name_='ConstrucaoCivil')
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Numero':
             sval_ = child_.text
@@ -2876,17 +3305,17 @@ class tcInfNfse(GeneratedsSuper):
             self.CodigoVerificacao = CodigoVerificacao_
             self.validate_tsCodigoVerificacao(self.CodigoVerificacao)    # validate type tsCodigoVerificacao
         elif nodeName_ == 'DataEmissao':
-            DataEmissao_ = child_.text
-            DataEmissao_ = self.gds_validate_string(DataEmissao_, node, 'DataEmissao')
-            self.DataEmissao = DataEmissao_
+            sval_ = child_.text
+            dval_ = self.gds_parse_datetime(sval_)
+            self.DataEmissao = dval_
         elif nodeName_ == 'IdentificacaoRps':
             obj_ = tcIdentificacaoRps.factory()
             obj_.build(child_)
-            self.set_IdentificacaoRps(obj_)
+            self.IdentificacaoRps = obj_
         elif nodeName_ == 'DataEmissaoRps':
-            DataEmissaoRps_ = child_.text
-            DataEmissaoRps_ = self.gds_validate_string(DataEmissaoRps_, node, 'DataEmissaoRps')
-            self.DataEmissaoRps = DataEmissaoRps_
+            sval_ = child_.text
+            dval_ = self.gds_parse_date(sval_)
+            self.DataEmissaoRps = dval_
         elif nodeName_ == 'NaturezaOperacao':
             sval_ = child_.text
             try:
@@ -2924,9 +3353,9 @@ class tcInfNfse(GeneratedsSuper):
             self.IncentivadorCultural = ival_
             self.validate_tsSimNao(self.IncentivadorCultural)    # validate type tsSimNao
         elif nodeName_ == 'Competencia':
-            Competencia_ = child_.text
-            Competencia_ = self.gds_validate_string(Competencia_, node, 'Competencia')
-            self.Competencia = Competencia_
+            sval_ = child_.text
+            dval_ = self.gds_parse_datetime(sval_)
+            self.Competencia = dval_
         elif nodeName_ == 'NfseSubstituida':
             sval_ = child_.text
             try:
@@ -2946,7 +3375,7 @@ class tcInfNfse(GeneratedsSuper):
         elif nodeName_ == 'Servico':
             obj_ = tcDadosServico.factory()
             obj_.build(child_)
-            self.set_Servico(obj_)
+            self.Servico = obj_
         elif nodeName_ == 'ValorCredito':
             sval_ = child_.text
             try:
@@ -2959,23 +3388,23 @@ class tcInfNfse(GeneratedsSuper):
         elif nodeName_ == 'PrestadorServico':
             obj_ = tcDadosPrestador.factory()
             obj_.build(child_)
-            self.set_PrestadorServico(obj_)
+            self.PrestadorServico = obj_
         elif nodeName_ == 'TomadorServico':
             obj_ = tcDadosTomador.factory()
             obj_.build(child_)
-            self.set_TomadorServico(obj_)
+            self.TomadorServico = obj_
         elif nodeName_ == 'IntermediarioServico':
             obj_ = tcIdentificacaoIntermediarioServico.factory()
             obj_.build(child_)
-            self.set_IntermediarioServico(obj_)
+            self.IntermediarioServico = obj_
         elif nodeName_ == 'OrgaoGerador':
             obj_ = tcIdentificacaoOrgaoGerador.factory()
             obj_.build(child_)
-            self.set_OrgaoGerador(obj_)
-        elif nodeName_ == 'ContrucaoCivil':
+            self.OrgaoGerador = obj_
+        elif nodeName_ == 'ConstrucaoCivil':
             obj_ = tcDadosConstrucaoCivil.factory()
             obj_.build(child_)
-            self.set_ContrucaoCivil(obj_)
+            self.ConstrucaoCivil = obj_
 # end class tcInfNfse
 
 
@@ -3000,36 +3429,45 @@ class tcNfse(GeneratedsSuper):
     def set_Signature(self, Signature): self.Signature = Signature
     def add_Signature(self, value): self.Signature.append(value)
     def insert_Signature(self, index, value): self.Signature[index] = value
-    def export(self, outfile, level, namespace_='', name_='tcNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcNfse'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcNfse', fromsubclass_=False):
-        if self.InfNfse is not None:
-            self.InfNfse.export(outfile, level, namespace_, name_='InfNfse', )
-        for Signature_ in self.Signature:
-            Signature_.export(outfile, level, namespace_, name_='Signature')
     def hasContent_(self):
         if (
             self.InfNfse is not None or
             self.Signature
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcNfse'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.InfNfse is not None:
+            self.InfNfse.export(outfile, level, namespace_, name_='InfNfse', pretty_print=pretty_print)
+        for Signature_ in self.Signature:
+            Signature_.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3054,7 +3492,8 @@ class tcNfse(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3064,7 +3503,7 @@ class tcNfse(GeneratedsSuper):
         if nodeName_ == 'InfNfse':
             obj_ = tcInfNfse.factory()
             obj_.build(child_)
-            self.set_InfNfse(obj_)
+            self.InfNfse = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
@@ -3075,8 +3514,8 @@ class tcNfse(GeneratedsSuper):
 class tcInfPedidoCancelamento(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, IdentificacaoNfse=None, CodigoCancelamento=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, IdentificacaoNfse=None, CodigoCancelamento=None):
+        self.Id = _cast(None, Id)
         self.IdentificacaoNfse = IdentificacaoNfse
         self.CodigoCancelamento = CodigoCancelamento
     def factory(*args_, **kwargs_):
@@ -3089,54 +3528,63 @@ class tcInfPedidoCancelamento(GeneratedsSuper):
     def set_IdentificacaoNfse(self, IdentificacaoNfse): self.IdentificacaoNfse = IdentificacaoNfse
     def get_CodigoCancelamento(self): return self.CodigoCancelamento
     def set_CodigoCancelamento(self, CodigoCancelamento): self.CodigoCancelamento = CodigoCancelamento
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
     def validate_tsCodigoCancelamentoNfse(self, value):
         # Validate type tsCodigoCancelamentoNfse, a restriction on xsd:string.
         pass
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcInfPedidoCancelamento', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfPedidoCancelamento')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfPedidoCancelamento'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcInfPedidoCancelamento', fromsubclass_=False):
-        if self.IdentificacaoNfse is not None:
-            self.IdentificacaoNfse.export(outfile, level, namespace_, name_='IdentificacaoNfse', )
-        if self.CodigoCancelamento is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigoCancelamento>%s</%sCodigoCancelamento>\n' % (namespace_, self.gds_format_string(quote_xml(self.CodigoCancelamento).encode(ExternalEncoding), input_name='CodigoCancelamento'), namespace_))
     def hasContent_(self):
         if (
             self.IdentificacaoNfse is not None or
             self.CodigoCancelamento is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcInfPedidoCancelamento', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfPedidoCancelamento')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfPedidoCancelamento'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcInfPedidoCancelamento', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoNfse is not None:
+            self.IdentificacaoNfse.export(outfile, level, namespace_, name_='IdentificacaoNfse', pretty_print=pretty_print)
+        if self.CodigoCancelamento is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigoCancelamento>%s</%sCodigoCancelamento>%s' % (namespace_, self.gds_format_string(quote_xml(self.CodigoCancelamento).encode(ExternalEncoding), input_name='CodigoCancelamento'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcInfPedidoCancelamento'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.IdentificacaoNfse is not None:
             showIndent(outfile, level)
@@ -3148,21 +3596,22 @@ class tcInfPedidoCancelamento(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('CodigoCancelamento=%s,\n' % quote_python(self.CodigoCancelamento).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'IdentificacaoNfse':
             obj_ = tcIdentificacaoNfse.factory()
             obj_.build(child_)
-            self.set_IdentificacaoNfse(obj_)
+            self.IdentificacaoNfse = obj_
         elif nodeName_ == 'CodigoCancelamento':
             CodigoCancelamento_ = child_.text
             CodigoCancelamento_ = self.gds_validate_string(CodigoCancelamento_, node, 'CodigoCancelamento')
@@ -3187,36 +3636,45 @@ class tcPedidoCancelamento(GeneratedsSuper):
     def set_InfPedidoCancelamento(self, InfPedidoCancelamento): self.InfPedidoCancelamento = InfPedidoCancelamento
     def get_Signature(self): return self.Signature
     def set_Signature(self, Signature): self.Signature = Signature
-    def export(self, outfile, level, namespace_='', name_='tcPedidoCancelamento', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcPedidoCancelamento')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcPedidoCancelamento'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcPedidoCancelamento', fromsubclass_=False):
-        if self.InfPedidoCancelamento is not None:
-            self.InfPedidoCancelamento.export(outfile, level, namespace_, name_='InfPedidoCancelamento', )
-        if self.Signature is not None:
-            self.Signature.export(outfile, level, namespace_, name_='Signature')
     def hasContent_(self):
         if (
             self.InfPedidoCancelamento is not None or
             self.Signature is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcPedidoCancelamento', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcPedidoCancelamento')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcPedidoCancelamento'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcPedidoCancelamento', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.InfPedidoCancelamento is not None:
+            self.InfPedidoCancelamento.export(outfile, level, namespace_, name_='InfPedidoCancelamento', pretty_print=pretty_print)
+        if self.Signature is not None:
+            self.Signature.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcPedidoCancelamento'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3235,7 +3693,8 @@ class tcPedidoCancelamento(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3245,21 +3704,25 @@ class tcPedidoCancelamento(GeneratedsSuper):
         if nodeName_ == 'InfPedidoCancelamento':
             obj_ = tcInfPedidoCancelamento.factory()
             obj_.build(child_)
-            self.set_InfPedidoCancelamento(obj_)
+            self.InfPedidoCancelamento = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
-            self.set_Signature(obj_)
+            self.Signature = obj_
 # end class tcPedidoCancelamento
 
 
 class tcConfirmacaoCancelamento(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, Pedido=None, DataHoraCancelamento=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, Pedido=None, DataHoraCancelamento=None):
+        self.Id = _cast(None, Id)
         self.Pedido = Pedido
-        self.DataHoraCancelamento = DataHoraCancelamento
+        if isinstance(DataHoraCancelamento, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataHoraCancelamento, '%Y-%m-%dT%H:%M:%S')
+        else:
+            initvalue_ = DataHoraCancelamento
+        self.DataHoraCancelamento = initvalue_
     def factory(*args_, **kwargs_):
         if tcConfirmacaoCancelamento.subclass:
             return tcConfirmacaoCancelamento.subclass(*args_, **kwargs_)
@@ -3270,51 +3733,60 @@ class tcConfirmacaoCancelamento(GeneratedsSuper):
     def set_Pedido(self, Pedido): self.Pedido = Pedido
     def get_DataHoraCancelamento(self): return self.DataHoraCancelamento
     def set_DataHoraCancelamento(self, DataHoraCancelamento): self.DataHoraCancelamento = DataHoraCancelamento
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcConfirmacaoCancelamento', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcConfirmacaoCancelamento')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcConfirmacaoCancelamento'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcConfirmacaoCancelamento', fromsubclass_=False):
-        if self.Pedido is not None:
-            self.Pedido.export(outfile, level, namespace_, name_='Pedido', )
-        if self.DataHoraCancelamento is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataHoraCancelamento>%s</%sDataHoraCancelamento>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataHoraCancelamento).encode(ExternalEncoding), input_name='DataHoraCancelamento'), namespace_))
     def hasContent_(self):
         if (
             self.Pedido is not None or
             self.DataHoraCancelamento is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcConfirmacaoCancelamento', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcConfirmacaoCancelamento')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcConfirmacaoCancelamento'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcConfirmacaoCancelamento', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Pedido is not None:
+            self.Pedido.export(outfile, level, namespace_, name_='Pedido', pretty_print=pretty_print)
+        if self.DataHoraCancelamento is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataHoraCancelamento>%s</%sDataHoraCancelamento>%s' % (namespace_, self.gds_format_datetime(self.DataHoraCancelamento, input_name='DataHoraCancelamento'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcConfirmacaoCancelamento'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.Pedido is not None:
             showIndent(outfile, level)
@@ -3324,27 +3796,28 @@ class tcConfirmacaoCancelamento(GeneratedsSuper):
             outfile.write('),\n')
         if self.DataHoraCancelamento is not None:
             showIndent(outfile, level)
-            outfile.write('DataHoraCancelamento=%s,\n' % quote_python(self.DataHoraCancelamento).encode(ExternalEncoding))
+            outfile.write('DataHoraCancelamento=model_.GeneratedsSuper.gds_parse_datetime("%s"),\n' % self.gds_format_datetime(self.DataHoraCancelamento, input_name='DataHoraCancelamento'))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Pedido':
             obj_ = tcPedidoCancelamento.factory()
             obj_.build(child_)
-            self.set_Pedido(obj_)
+            self.Pedido = obj_
         elif nodeName_ == 'DataHoraCancelamento':
-            DataHoraCancelamento_ = child_.text
-            DataHoraCancelamento_ = self.gds_validate_string(DataHoraCancelamento_, node, 'DataHoraCancelamento')
-            self.DataHoraCancelamento = DataHoraCancelamento_
+            sval_ = child_.text
+            dval_ = self.gds_parse_datetime(sval_)
+            self.DataHoraCancelamento = dval_
 # end class tcConfirmacaoCancelamento
 
 
@@ -3364,36 +3837,45 @@ class tcCancelamentoNfse(GeneratedsSuper):
     def set_Confirmacao(self, Confirmacao): self.Confirmacao = Confirmacao
     def get_Signature(self): return self.Signature
     def set_Signature(self, Signature): self.Signature = Signature
-    def export(self, outfile, level, namespace_='', name_='tcCancelamentoNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCancelamentoNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCancelamentoNfse'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcCancelamentoNfse', fromsubclass_=False):
-        if self.Confirmacao is not None:
-            self.Confirmacao.export(outfile, level, namespace_, name_='Confirmacao', )
-        if self.Signature is not None:
-            self.Signature.export(outfile, level, namespace_, name_='Signature', )
     def hasContent_(self):
         if (
             self.Confirmacao is not None or
             self.Signature is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcCancelamentoNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCancelamentoNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCancelamentoNfse'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcCancelamentoNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Confirmacao is not None:
+            self.Confirmacao.export(outfile, level, namespace_, name_='Confirmacao', pretty_print=pretty_print)
+        if self.Signature is not None:
+            self.Signature.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcCancelamentoNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3412,7 +3894,8 @@ class tcCancelamentoNfse(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3422,19 +3905,19 @@ class tcCancelamentoNfse(GeneratedsSuper):
         if nodeName_ == 'Confirmacao':
             obj_ = tcConfirmacaoCancelamento.factory()
             obj_.build(child_)
-            self.set_Confirmacao(obj_)
+            self.Confirmacao = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
-            self.set_Signature(obj_)
+            self.Signature = obj_
 # end class tcCancelamentoNfse
 
 
 class tcInfSubstituicaoNfse(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, NfseSubstituidora=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, NfseSubstituidora=None):
+        self.Id = _cast(None, Id)
         self.NfseSubstituidora = NfseSubstituidora
     def factory(*args_, **kwargs_):
         if tcInfSubstituicaoNfse.subclass:
@@ -3444,66 +3927,76 @@ class tcInfSubstituicaoNfse(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_NfseSubstituidora(self): return self.NfseSubstituidora
     def set_NfseSubstituidora(self, NfseSubstituidora): self.NfseSubstituidora = NfseSubstituidora
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
     def validate_tsNumeroNfse(self, value):
         # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
         pass
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcInfSubstituicaoNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfSubstituicaoNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfSubstituicaoNfse'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcInfSubstituicaoNfse', fromsubclass_=False):
-        if self.NfseSubstituidora is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNfseSubstituidora>%s</%sNfseSubstituidora>\n' % (namespace_, self.gds_format_integer(self.NfseSubstituidora, input_name='NfseSubstituidora'), namespace_))
     def hasContent_(self):
         if (
             self.NfseSubstituidora is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcInfSubstituicaoNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcInfSubstituicaoNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcInfSubstituicaoNfse'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcInfSubstituicaoNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.NfseSubstituidora is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNfseSubstituidora>%s</%sNfseSubstituidora>%s' % (namespace_, self.gds_format_integer(self.NfseSubstituidora, input_name='NfseSubstituidora'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcInfSubstituicaoNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.NfseSubstituidora is not None:
             showIndent(outfile, level)
             outfile.write('NfseSubstituidora=%d,\n' % self.NfseSubstituidora)
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'NfseSubstituidora':
             sval_ = child_.text
@@ -3540,36 +4033,45 @@ class tcSubstituicaoNfse(GeneratedsSuper):
     def set_Signature(self, Signature): self.Signature = Signature
     def add_Signature(self, value): self.Signature.append(value)
     def insert_Signature(self, index, value): self.Signature[index] = value
-    def export(self, outfile, level, namespace_='', name_='tcSubstituicaoNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcSubstituicaoNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcSubstituicaoNfse'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcSubstituicaoNfse', fromsubclass_=False):
-        if self.SubstituicaoNfse is not None:
-            self.SubstituicaoNfse.export(outfile, level, namespace_, name_='SubstituicaoNfse', )
-        for Signature_ in self.Signature:
-            Signature_.export(outfile, level, namespace_, name_='Signature')
     def hasContent_(self):
         if (
             self.SubstituicaoNfse is not None or
             self.Signature
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcSubstituicaoNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcSubstituicaoNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcSubstituicaoNfse'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcSubstituicaoNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.SubstituicaoNfse is not None:
+            self.SubstituicaoNfse.export(outfile, level, namespace_, name_='SubstituicaoNfse', pretty_print=pretty_print)
+        for Signature_ in self.Signature:
+            Signature_.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcSubstituicaoNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3594,7 +4096,8 @@ class tcSubstituicaoNfse(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3604,7 +4107,7 @@ class tcSubstituicaoNfse(GeneratedsSuper):
         if nodeName_ == 'SubstituicaoNfse':
             obj_ = tcInfSubstituicaoNfse.factory()
             obj_.build(child_)
-            self.set_SubstituicaoNfse(obj_)
+            self.SubstituicaoNfse = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
@@ -3631,39 +4134,48 @@ class tcCompNfse(GeneratedsSuper):
     def set_NfseCancelamento(self, NfseCancelamento): self.NfseCancelamento = NfseCancelamento
     def get_NfseSubstituicao(self): return self.NfseSubstituicao
     def set_NfseSubstituicao(self, NfseSubstituicao): self.NfseSubstituicao = NfseSubstituicao
-    def export(self, outfile, level, namespace_='', name_='tcCompNfse', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCompNfse')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCompNfse'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcCompNfse', fromsubclass_=False):
-        if self.Nfse is not None:
-            self.Nfse.export(outfile, level, namespace_, name_='Nfse', )
-        if self.NfseCancelamento is not None:
-            self.NfseCancelamento.export(outfile, level, namespace_, name_='NfseCancelamento')
-        if self.NfseSubstituicao is not None:
-            self.NfseSubstituicao.export(outfile, level, namespace_, name_='NfseSubstituicao')
     def hasContent_(self):
         if (
             self.Nfse is not None or
             self.NfseCancelamento is not None or
             self.NfseSubstituicao is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcCompNfse', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcCompNfse')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcCompNfse'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcCompNfse', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Nfse is not None:
+            self.Nfse.export(outfile, level, namespace_, name_='Nfse', pretty_print=pretty_print)
+        if self.NfseCancelamento is not None:
+            self.NfseCancelamento.export(outfile, level, namespace_, name_='NfseCancelamento', pretty_print=pretty_print)
+        if self.NfseSubstituicao is not None:
+            self.NfseSubstituicao.export(outfile, level, namespace_, name_='NfseSubstituicao', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcCompNfse'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3688,7 +4200,8 @@ class tcCompNfse(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3698,15 +4211,15 @@ class tcCompNfse(GeneratedsSuper):
         if nodeName_ == 'Nfse':
             obj_ = tcNfse.factory()
             obj_.build(child_)
-            self.set_Nfse(obj_)
+            self.Nfse = obj_
         elif nodeName_ == 'NfseCancelamento':
             obj_ = tcCancelamentoNfse.factory()
             obj_.build(child_)
-            self.set_NfseCancelamento(obj_)
+            self.NfseCancelamento = obj_
         elif nodeName_ == 'NfseSubstituicao':
             obj_ = tcSubstituicaoNfse.factory()
             obj_.build(child_)
-            self.set_NfseSubstituicao(obj_)
+            self.NfseSubstituicao = obj_
 # end class tcCompNfse
 
 
@@ -3728,33 +4241,42 @@ class ListaMensagemRetorno(GeneratedsSuper):
     def set_MensagemRetorno(self, MensagemRetorno): self.MensagemRetorno = MensagemRetorno
     def add_MensagemRetorno(self, value): self.MensagemRetorno.append(value)
     def insert_MensagemRetorno(self, index, value): self.MensagemRetorno[index] = value
-    def export(self, outfile, level, namespace_='', name_='ListaMensagemRetorno', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaMensagemRetorno')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaMensagemRetorno'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ListaMensagemRetorno', fromsubclass_=False):
-        for MensagemRetorno_ in self.MensagemRetorno:
-            MensagemRetorno_.export(outfile, level, namespace_, name_='MensagemRetorno')
     def hasContent_(self):
         if (
             self.MensagemRetorno
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ListaMensagemRetorno', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaMensagemRetorno')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaMensagemRetorno'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ListaMensagemRetorno', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for MensagemRetorno_ in self.MensagemRetorno:
+            MensagemRetorno_.export(outfile, level, namespace_, name_='MensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ListaMensagemRetorno'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3773,7 +4295,8 @@ class ListaMensagemRetorno(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3802,52 +4325,61 @@ class tcMensagemRetorno(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Codigo(self): return self.Codigo
     def set_Codigo(self, Codigo): self.Codigo = Codigo
+    def get_Mensagem(self): return self.Mensagem
+    def set_Mensagem(self, Mensagem): self.Mensagem = Mensagem
+    def get_Correcao(self): return self.Correcao
+    def set_Correcao(self, Correcao): self.Correcao = Correcao
     def validate_tsCodigoMensagemAlerta(self, value):
         # Validate type tsCodigoMensagemAlerta, a restriction on xsd:string.
         pass
-    def get_Mensagem(self): return self.Mensagem
-    def set_Mensagem(self, Mensagem): self.Mensagem = Mensagem
     def validate_tsDescricaoMensagemAlerta(self, value):
         # Validate type tsDescricaoMensagemAlerta, a restriction on xsd:string.
         pass
-    def get_Correcao(self): return self.Correcao
-    def set_Correcao(self, Correcao): self.Correcao = Correcao
-    def export(self, outfile, level, namespace_='', name_='tcMensagemRetorno', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcMensagemRetorno')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcMensagemRetorno'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcMensagemRetorno', fromsubclass_=False):
-        if self.Codigo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigo>%s</%sCodigo>\n' % (namespace_, self.gds_format_string(quote_xml(self.Codigo).encode(ExternalEncoding), input_name='Codigo'), namespace_))
-        if self.Mensagem is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sMensagem>%s</%sMensagem>\n' % (namespace_, self.gds_format_string(quote_xml(self.Mensagem).encode(ExternalEncoding), input_name='Mensagem'), namespace_))
-        if self.Correcao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCorrecao>%s</%sCorrecao>\n' % (namespace_, self.gds_format_string(quote_xml(self.Correcao).encode(ExternalEncoding), input_name='Correcao'), namespace_))
     def hasContent_(self):
         if (
             self.Codigo is not None or
             self.Mensagem is not None or
             self.Correcao is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcMensagemRetorno', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcMensagemRetorno')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcMensagemRetorno'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcMensagemRetorno', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Codigo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigo>%s</%sCodigo>%s' % (namespace_, self.gds_format_string(quote_xml(self.Codigo).encode(ExternalEncoding), input_name='Codigo'), namespace_, eol_))
+        if self.Mensagem is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sMensagem>%s</%sMensagem>%s' % (namespace_, self.gds_format_string(quote_xml(self.Mensagem).encode(ExternalEncoding), input_name='Mensagem'), namespace_, eol_))
+        if self.Correcao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCorrecao>%s</%sCorrecao>%s' % (namespace_, self.gds_format_string(quote_xml(self.Correcao).encode(ExternalEncoding), input_name='Correcao'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcMensagemRetorno'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3863,7 +4395,8 @@ class tcMensagemRetorno(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Correcao=%s,\n' % quote_python(self.Correcao).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3905,49 +4438,58 @@ class tcMensagemRetornoLote(GeneratedsSuper):
     def set_IdentificacaoRps(self, IdentificacaoRps): self.IdentificacaoRps = IdentificacaoRps
     def get_Codigo(self): return self.Codigo
     def set_Codigo(self, Codigo): self.Codigo = Codigo
+    def get_Mensagem(self): return self.Mensagem
+    def set_Mensagem(self, Mensagem): self.Mensagem = Mensagem
     def validate_tsCodigoMensagemAlerta(self, value):
         # Validate type tsCodigoMensagemAlerta, a restriction on xsd:string.
         pass
-    def get_Mensagem(self): return self.Mensagem
-    def set_Mensagem(self, Mensagem): self.Mensagem = Mensagem
     def validate_tsDescricaoMensagemAlerta(self, value):
         # Validate type tsDescricaoMensagemAlerta, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcMensagemRetornoLote', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcMensagemRetornoLote')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcMensagemRetornoLote'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='tcMensagemRetornoLote', fromsubclass_=False):
-        if self.IdentificacaoRps is not None:
-            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', )
-        if self.Codigo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCodigo>%s</%sCodigo>\n' % (namespace_, self.gds_format_string(quote_xml(self.Codigo).encode(ExternalEncoding), input_name='Codigo'), namespace_))
-        if self.Mensagem is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sMensagem>%s</%sMensagem>\n' % (namespace_, self.gds_format_string(quote_xml(self.Mensagem).encode(ExternalEncoding), input_name='Mensagem'), namespace_))
     def hasContent_(self):
         if (
             self.IdentificacaoRps is not None or
             self.Codigo is not None or
             self.Mensagem is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcMensagemRetornoLote', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcMensagemRetornoLote')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcMensagemRetornoLote'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='tcMensagemRetornoLote', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoRps is not None:
+            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', pretty_print=pretty_print)
+        if self.Codigo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCodigo>%s</%sCodigo>%s' % (namespace_, self.gds_format_string(quote_xml(self.Codigo).encode(ExternalEncoding), input_name='Codigo'), namespace_, eol_))
+        if self.Mensagem is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sMensagem>%s</%sMensagem>%s' % (namespace_, self.gds_format_string(quote_xml(self.Mensagem).encode(ExternalEncoding), input_name='Mensagem'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='tcMensagemRetornoLote'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -3966,7 +4508,8 @@ class tcMensagemRetornoLote(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Mensagem=%s,\n' % quote_python(self.Mensagem).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -3976,7 +4519,7 @@ class tcMensagemRetornoLote(GeneratedsSuper):
         if nodeName_ == 'IdentificacaoRps':
             obj_ = tcIdentificacaoRps.factory()
             obj_.build(child_)
-            self.set_IdentificacaoRps(obj_)
+            self.IdentificacaoRps = obj_
         elif nodeName_ == 'Codigo':
             Codigo_ = child_.text
             Codigo_ = self.gds_validate_string(Codigo_, node, 'Codigo')
@@ -3993,8 +4536,8 @@ class tcMensagemRetornoLote(GeneratedsSuper):
 class tcLoteRps(GeneratedsSuper):
     subclass = None
     superclass = None
-    def __init__(self, id=None, NumeroLote=None, Cnpj=None, InscricaoMunicipal=None, QuantidadeRps=None, ListaRps=None):
-        self.id = _cast(None, id)
+    def __init__(self, Id=None, NumeroLote=None, Cnpj=None, InscricaoMunicipal=None, QuantidadeRps=None, ListaRps=None):
+        self.Id = _cast(None, Id)
         self.NumeroLote = NumeroLote
         self.Cnpj = Cnpj
         self.InscricaoMunicipal = InscricaoMunicipal
@@ -4008,62 +4551,31 @@ class tcLoteRps(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_NumeroLote(self): return self.NumeroLote
     def set_NumeroLote(self, NumeroLote): self.NumeroLote = NumeroLote
+    def get_Cnpj(self): return self.Cnpj
+    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
+    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
+    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
+    def get_QuantidadeRps(self): return self.QuantidadeRps
+    def set_QuantidadeRps(self, QuantidadeRps): self.QuantidadeRps = QuantidadeRps
+    def get_ListaRps(self): return self.ListaRps
+    def set_ListaRps(self, ListaRps): self.ListaRps = ListaRps
+    def get_Id(self): return self.Id
+    def set_Id(self, Id): self.Id = Id
     def validate_tsNumeroLote(self, value):
         # Validate type tsNumeroLote, a restriction on xsd:nonNegativeInteger.
         pass
-    def get_Cnpj(self): return self.Cnpj
-    def set_Cnpj(self, Cnpj): self.Cnpj = Cnpj
     def validate_tsCnpj(self, value):
         # Validate type tsCnpj, a restriction on xsd:string.
         pass
-    def get_InscricaoMunicipal(self): return self.InscricaoMunicipal
-    def set_InscricaoMunicipal(self, InscricaoMunicipal): self.InscricaoMunicipal = InscricaoMunicipal
     def validate_tsInscricaoMunicipal(self, value):
         # Validate type tsInscricaoMunicipal, a restriction on xsd:string.
         pass
-    def get_QuantidadeRps(self): return self.QuantidadeRps
-    def set_QuantidadeRps(self, QuantidadeRps): self.QuantidadeRps = QuantidadeRps
     def validate_tsQuantidadeRps(self, value):
         # Validate type tsQuantidadeRps, a restriction on xsd:int.
         pass
-    def get_ListaRps(self): return self.ListaRps
-    def set_ListaRps(self, ListaRps): self.ListaRps = ListaRps
-    def get_id(self): return self.id
-    def set_id(self, id): self.id = id
     def validate_tsIdTag(self, value):
         # Validate type tsIdTag, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='tcLoteRps', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcLoteRps')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcLoteRps'):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            outfile.write(' id=%s' % (quote_attrib(self.id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='tcLoteRps', fromsubclass_=False):
-        if self.NumeroLote is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumeroLote>%s</%sNumeroLote>\n' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_))
-        if self.Cnpj is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sCnpj>%s</%sCnpj>\n' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_))
-        if self.InscricaoMunicipal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>\n' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_))
-        if self.QuantidadeRps is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sQuantidadeRps>%s</%sQuantidadeRps>\n' % (namespace_, self.gds_format_integer(self.QuantidadeRps, input_name='QuantidadeRps'), namespace_))
-        if self.ListaRps is not None:
-            self.ListaRps.export(outfile, level, namespace_, name_='ListaRps', )
     def hasContent_(self):
         if (
             self.NumeroLote is not None or
@@ -4071,20 +4583,60 @@ class tcLoteRps(GeneratedsSuper):
             self.InscricaoMunicipal is not None or
             self.QuantidadeRps is not None or
             self.ListaRps is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='tcLoteRps', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='tcLoteRps')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='tcLoteRps'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='tcLoteRps', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.NumeroLote is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumeroLote>%s</%sNumeroLote>%s' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_, eol_))
+        if self.Cnpj is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sCnpj>%s</%sCnpj>%s' % (namespace_, self.gds_format_string(quote_xml(self.Cnpj).encode(ExternalEncoding), input_name='Cnpj'), namespace_, eol_))
+        if self.InscricaoMunicipal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sInscricaoMunicipal>%s</%sInscricaoMunicipal>%s' % (namespace_, self.gds_format_string(quote_xml(self.InscricaoMunicipal).encode(ExternalEncoding), input_name='InscricaoMunicipal'), namespace_, eol_))
+        if self.QuantidadeRps is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sQuantidadeRps>%s</%sQuantidadeRps>%s' % (namespace_, self.gds_format_integer(self.QuantidadeRps, input_name='QuantidadeRps'), namespace_, eol_))
+        if self.ListaRps is not None:
+            self.ListaRps.export(outfile, level, namespace_, name_='ListaRps', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='tcLoteRps'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
-        if self.id is not None and 'id' not in already_processed:
-            already_processed.append('id')
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('id = "%s",\n' % (self.id,))
+            outfile.write('Id="%s",\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.NumeroLote is not None:
             showIndent(outfile, level)
@@ -4105,16 +4657,17 @@ class tcLoteRps(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
-        value = find_attr_value_('id', node)
-        if value is not None and 'id' not in already_processed:
-            already_processed.append('id')
-            self.id = value
-            self.validate_tsIdTag(self.id)    # validate type tsIdTag
+        value = find_attr_value_('Id', node)
+        if value is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            self.Id = value
+            self.validate_tsIdTag(self.Id)    # validate type tsIdTag
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'NumeroLote':
             sval_ = child_.text
@@ -4149,7 +4702,7 @@ class tcLoteRps(GeneratedsSuper):
         elif nodeName_ == 'ListaRps':
             obj_ = ListaRpsType.factory()
             obj_.build(child_)
-            self.set_ListaRps(obj_)
+            self.ListaRps = obj_
 # end class tcLoteRps
 
 
@@ -4158,7 +4711,11 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
     superclass = None
     def __init__(self, NumeroLote=None, DataRecebimento=None, Protocolo=None, ListaMensagemRetorno=None):
         self.NumeroLote = NumeroLote
-        self.DataRecebimento = DataRecebimento
+        if isinstance(DataRecebimento, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataRecebimento, '%Y-%m-%dT%H:%M:%S')
+        else:
+            initvalue_ = DataRecebimento
+        self.DataRecebimento = initvalue_
         self.Protocolo = Protocolo
         self.ListaMensagemRetorno = ListaMensagemRetorno
     def factory(*args_, **kwargs_):
@@ -4169,57 +4726,66 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_NumeroLote(self): return self.NumeroLote
     def set_NumeroLote(self, NumeroLote): self.NumeroLote = NumeroLote
-    def validate_tsNumeroLote(self, value):
-        # Validate type tsNumeroLote, a restriction on xsd:nonNegativeInteger.
-        pass
     def get_DataRecebimento(self): return self.DataRecebimento
     def set_DataRecebimento(self, DataRecebimento): self.DataRecebimento = DataRecebimento
     def get_Protocolo(self): return self.Protocolo
     def set_Protocolo(self, Protocolo): self.Protocolo = Protocolo
+    def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
+    def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
+    def validate_tsNumeroLote(self, value):
+        # Validate type tsNumeroLote, a restriction on xsd:nonNegativeInteger.
+        pass
     def validate_tsNumeroProtocolo(self, value):
         # Validate type tsNumeroProtocolo, a restriction on xsd:string.
         pass
-    def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
-    def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='EnviarLoteRpsResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='EnviarLoteRpsResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='EnviarLoteRpsResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='EnviarLoteRpsResposta', fromsubclass_=False):
-        if self.NumeroLote is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumeroLote>%s</%sNumeroLote>\n' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_))
-        if self.DataRecebimento is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataRecebimento>%s</%sDataRecebimento>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataRecebimento).encode(ExternalEncoding), input_name='DataRecebimento'), namespace_))
-        if self.Protocolo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sProtocolo>%s</%sProtocolo>\n' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_))
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.NumeroLote is not None or
             self.DataRecebimento is not None or
             self.Protocolo is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='EnviarLoteRpsResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='EnviarLoteRpsResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='EnviarLoteRpsResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='EnviarLoteRpsResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.NumeroLote is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumeroLote>%s</%sNumeroLote>%s' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_, eol_))
+        if self.DataRecebimento is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataRecebimento>%s</%sDataRecebimento>%s' % (namespace_, self.gds_format_datetime(self.DataRecebimento, input_name='DataRecebimento'), namespace_, eol_))
+        if self.Protocolo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sProtocolo>%s</%sProtocolo>%s' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_, eol_))
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='EnviarLoteRpsResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4230,7 +4796,7 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
             outfile.write('NumeroLote=%d,\n' % self.NumeroLote)
         if self.DataRecebimento is not None:
             showIndent(outfile, level)
-            outfile.write('DataRecebimento=%s,\n' % quote_python(self.DataRecebimento).encode(ExternalEncoding))
+            outfile.write('DataRecebimento=model_.GeneratedsSuper.gds_parse_datetime("%s"),\n' % self.gds_format_datetime(self.DataRecebimento, input_name='DataRecebimento'))
         if self.Protocolo is not None:
             showIndent(outfile, level)
             outfile.write('Protocolo=%s,\n' % quote_python(self.Protocolo).encode(ExternalEncoding))
@@ -4241,7 +4807,8 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4260,9 +4827,9 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
             self.NumeroLote = ival_
             self.validate_tsNumeroLote(self.NumeroLote)    # validate type tsNumeroLote
         elif nodeName_ == 'DataRecebimento':
-            DataRecebimento_ = child_.text
-            DataRecebimento_ = self.gds_validate_string(DataRecebimento_, node, 'DataRecebimento')
-            self.DataRecebimento = DataRecebimento_
+            sval_ = child_.text
+            dval_ = self.gds_parse_datetime(sval_)
+            self.DataRecebimento = dval_
         elif nodeName_ == 'Protocolo':
             Protocolo_ = child_.text
             Protocolo_ = self.gds_validate_string(Protocolo_, node, 'Protocolo')
@@ -4271,7 +4838,7 @@ class EnviarLoteRpsResposta(GeneratedsSuper):
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class EnviarLoteRpsResposta
 
 
@@ -4291,36 +4858,45 @@ class EnviarLoteRpsEnvio(GeneratedsSuper):
     def set_LoteRps(self, LoteRps): self.LoteRps = LoteRps
     def get_Signature(self): return self.Signature
     def set_Signature(self, Signature): self.Signature = Signature
-    def export(self, outfile, level, namespace_='', name_='EnviarLoteRpsEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='EnviarLoteRpsEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='EnviarLoteRpsEnvio'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='EnviarLoteRpsEnvio', fromsubclass_=False):
-        if self.LoteRps is not None:
-            self.LoteRps.export(outfile, level, namespace_, name_='LoteRps', )
-        if self.Signature is not None:
-            self.Signature.export(outfile, level, namespace_, name_='Signature')
     def hasContent_(self):
         if (
             self.LoteRps is not None or
             self.Signature is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='EnviarLoteRpsEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='EnviarLoteRpsEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='EnviarLoteRpsEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='EnviarLoteRpsEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.LoteRps is not None:
+            self.LoteRps.export(outfile, level, namespace_, name_='LoteRps', pretty_print=pretty_print)
+        if self.Signature is not None:
+            self.Signature.export(outfile, level, namespace_, name_='Signature', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='EnviarLoteRpsEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4339,7 +4915,8 @@ class EnviarLoteRpsEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4349,11 +4926,11 @@ class EnviarLoteRpsEnvio(GeneratedsSuper):
         if nodeName_ == 'LoteRps':
             obj_ = tcLoteRps.factory()
             obj_.build(child_)
-            self.set_LoteRps(obj_)
+            self.LoteRps = obj_
         elif nodeName_ == 'Signature':
             obj_ = SignatureType.factory()
             obj_.build(child_)
-            self.set_Signature(obj_)
+            self.Signature = obj_
 # end class EnviarLoteRpsEnvio
 
 
@@ -4372,51 +4949,60 @@ class ConsultarSituacaoLoteRpsResposta(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_NumeroLote(self): return self.NumeroLote
     def set_NumeroLote(self, NumeroLote): self.NumeroLote = NumeroLote
+    def get_Situacao(self): return self.Situacao
+    def set_Situacao(self, Situacao): self.Situacao = Situacao
+    def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
+    def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
     def validate_tsNumeroLote(self, value):
         # Validate type tsNumeroLote, a restriction on xsd:nonNegativeInteger.
         pass
-    def get_Situacao(self): return self.Situacao
-    def set_Situacao(self, Situacao): self.Situacao = Situacao
     def validate_tsSituacaoLoteRps(self, value):
         # Validate type tsSituacaoLoteRps, a restriction on xsd:byte.
         pass
-    def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
-    def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarSituacaoLoteRpsResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarSituacaoLoteRpsResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsResposta', fromsubclass_=False):
-        if self.NumeroLote is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumeroLote>%s</%sNumeroLote>\n' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_))
-        if self.Situacao is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sSituacao>%s</%sSituacao>\n' % (namespace_, self.gds_format_integer(self.Situacao, input_name='Situacao'), namespace_))
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.NumeroLote is not None or
             self.Situacao is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarSituacaoLoteRpsResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarSituacaoLoteRpsResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.NumeroLote is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumeroLote>%s</%sNumeroLote>%s' % (namespace_, self.gds_format_integer(self.NumeroLote, input_name='NumeroLote'), namespace_, eol_))
+        if self.Situacao is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sSituacao>%s</%sSituacao>%s' % (namespace_, self.gds_format_integer(self.Situacao, input_name='Situacao'), namespace_, eol_))
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarSituacaoLoteRpsResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4435,7 +5021,8 @@ class ConsultarSituacaoLoteRpsResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4465,7 +5052,7 @@ class ConsultarSituacaoLoteRpsResposta(GeneratedsSuper):
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class ConsultarSituacaoLoteRpsResposta
 
 
@@ -4488,37 +5075,46 @@ class ConsultarSituacaoLoteRpsEnvio(GeneratedsSuper):
     def validate_tsNumeroProtocolo(self, value):
         # Validate type tsNumeroProtocolo, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarSituacaoLoteRpsEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio', fromsubclass_=False):
-        if self.Prestador is not None:
-            self.Prestador.export(outfile, level, namespace_, name_='Prestador', )
-        if self.Protocolo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sProtocolo>%s</%sProtocolo>\n' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_))
     def hasContent_(self):
         if (
             self.Prestador is not None or
             self.Protocolo is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarSituacaoLoteRpsEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarSituacaoLoteRpsEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Prestador is not None:
+            self.Prestador.export(outfile, level, namespace_, name_='Prestador', pretty_print=pretty_print)
+        if self.Protocolo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sProtocolo>%s</%sProtocolo>%s' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='ConsultarSituacaoLoteRpsEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4534,7 +5130,8 @@ class ConsultarSituacaoLoteRpsEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Protocolo=%s,\n' % quote_python(self.Protocolo).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4544,7 +5141,7 @@ class ConsultarSituacaoLoteRpsEnvio(GeneratedsSuper):
         if nodeName_ == 'Prestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_Prestador(obj_)
+            self.Prestador = obj_
         elif nodeName_ == 'Protocolo':
             Protocolo_ = child_.text
             Protocolo_ = self.gds_validate_string(Protocolo_, node, 'Protocolo')
@@ -4569,36 +5166,45 @@ class ConsultarNfseRpsResposta(GeneratedsSuper):
     def set_CompNfse(self, CompNfse): self.CompNfse = CompNfse
     def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
     def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='ConsultarNfseRpsResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseRpsResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseRpsResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseRpsResposta', fromsubclass_=False):
-        if self.CompNfse is not None:
-            self.CompNfse.export(outfile, level, namespace_, name_='CompNfse', )
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.CompNfse is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarNfseRpsResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseRpsResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseRpsResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseRpsResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.CompNfse is not None:
+            self.CompNfse.export(outfile, level, namespace_, name_='CompNfse', pretty_print=pretty_print)
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarNfseRpsResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4617,7 +5223,8 @@ class ConsultarNfseRpsResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4627,11 +5234,11 @@ class ConsultarNfseRpsResposta(GeneratedsSuper):
         if nodeName_ == 'CompNfse':
             obj_ = tcCompNfse.factory()
             obj_.build(child_)
-            self.set_CompNfse(obj_)
+            self.CompNfse = obj_
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class ConsultarNfseRpsResposta
 
 
@@ -4651,36 +5258,45 @@ class ConsultarNfseRpsEnvio(GeneratedsSuper):
     def set_IdentificacaoRps(self, IdentificacaoRps): self.IdentificacaoRps = IdentificacaoRps
     def get_Prestador(self): return self.Prestador
     def set_Prestador(self, Prestador): self.Prestador = Prestador
-    def export(self, outfile, level, namespace_='', name_='ConsultarNfseRpsEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseRpsEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseRpsEnvio'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseRpsEnvio', fromsubclass_=False):
-        if self.IdentificacaoRps is not None:
-            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', )
-        if self.Prestador is not None:
-            self.Prestador.export(outfile, level, namespace_, name_='Prestador', )
     def hasContent_(self):
         if (
             self.IdentificacaoRps is not None or
             self.Prestador is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarNfseRpsEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseRpsEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseRpsEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseRpsEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.IdentificacaoRps is not None:
+            self.IdentificacaoRps.export(outfile, level, namespace_, name_='IdentificacaoRps', pretty_print=pretty_print)
+        if self.Prestador is not None:
+            self.Prestador.export(outfile, level, namespace_, name_='Prestador', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarNfseRpsEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4699,7 +5315,8 @@ class ConsultarNfseRpsEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4709,11 +5326,11 @@ class ConsultarNfseRpsEnvio(GeneratedsSuper):
         if nodeName_ == 'IdentificacaoRps':
             obj_ = tcIdentificacaoRps.factory()
             obj_.build(child_)
-            self.set_IdentificacaoRps(obj_)
+            self.IdentificacaoRps = obj_
         elif nodeName_ == 'Prestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_Prestador(obj_)
+            self.Prestador = obj_
 # end class ConsultarNfseRpsEnvio
 
 
@@ -4733,36 +5350,45 @@ class ConsultarNfseResposta(GeneratedsSuper):
     def set_ListaNfse(self, ListaNfse): self.ListaNfse = ListaNfse
     def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
     def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='ConsultarNfseResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseResposta', fromsubclass_=False):
-        if self.ListaNfse is not None:
-            self.ListaNfse.export(outfile, level, namespace_, name_='ListaNfse', )
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.ListaNfse is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarNfseResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.ListaNfse is not None:
+            self.ListaNfse.export(outfile, level, namespace_, name_='ListaNfse', pretty_print=pretty_print)
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarNfseResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4781,7 +5407,8 @@ class ConsultarNfseResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4791,11 +5418,11 @@ class ConsultarNfseResposta(GeneratedsSuper):
         if nodeName_ == 'ListaNfse':
             obj_ = ListaNfseType.factory()
             obj_.build(child_)
-            self.set_ListaNfse(obj_)
+            self.ListaNfse = obj_
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class ConsultarNfseResposta
 
 
@@ -4818,41 +5445,15 @@ class ConsultarNfseEnvio(GeneratedsSuper):
     def set_Prestador(self, Prestador): self.Prestador = Prestador
     def get_NumeroNfse(self): return self.NumeroNfse
     def set_NumeroNfse(self, NumeroNfse): self.NumeroNfse = NumeroNfse
-    def validate_tsNumeroNfse(self, value):
-        # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
-        pass
     def get_PeriodoEmissao(self): return self.PeriodoEmissao
     def set_PeriodoEmissao(self, PeriodoEmissao): self.PeriodoEmissao = PeriodoEmissao
     def get_Tomador(self): return self.Tomador
     def set_Tomador(self, Tomador): self.Tomador = Tomador
     def get_IntermediarioServico(self): return self.IntermediarioServico
     def set_IntermediarioServico(self, IntermediarioServico): self.IntermediarioServico = IntermediarioServico
-    def export(self, outfile, level, namespace_='', name_='ConsultarNfseEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseEnvio'):
+    def validate_tsNumeroNfse(self, value):
+        # Validate type tsNumeroNfse, a restriction on xsd:nonNegativeInteger.
         pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseEnvio', fromsubclass_=False):
-        if self.Prestador is not None:
-            self.Prestador.export(outfile, level, namespace_, name_='Prestador', )
-        if self.NumeroNfse is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sNumeroNfse>%s</%sNumeroNfse>\n' % (namespace_, self.gds_format_integer(self.NumeroNfse, input_name='NumeroNfse'), namespace_))
-        if self.PeriodoEmissao is not None:
-            self.PeriodoEmissao.export(outfile, level, namespace_, name_='PeriodoEmissao')
-        if self.Tomador is not None:
-            self.Tomador.export(outfile, level, namespace_, name_='Tomador')
-        if self.IntermediarioServico is not None:
-            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico')
     def hasContent_(self):
         if (
             self.Prestador is not None or
@@ -4860,13 +5461,48 @@ class ConsultarNfseEnvio(GeneratedsSuper):
             self.PeriodoEmissao is not None or
             self.Tomador is not None or
             self.IntermediarioServico is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarNfseEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarNfseEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarNfseEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarNfseEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Prestador is not None:
+            self.Prestador.export(outfile, level, namespace_, name_='Prestador', pretty_print=pretty_print)
+        if self.NumeroNfse is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sNumeroNfse>%s</%sNumeroNfse>%s' % (namespace_, self.gds_format_integer(self.NumeroNfse, input_name='NumeroNfse'), namespace_, eol_))
+        if self.PeriodoEmissao is not None:
+            self.PeriodoEmissao.export(outfile, level, namespace_, name_='PeriodoEmissao', pretty_print=pretty_print)
+        if self.Tomador is not None:
+            self.Tomador.export(outfile, level, namespace_, name_='Tomador', pretty_print=pretty_print)
+        if self.IntermediarioServico is not None:
+            self.IntermediarioServico.export(outfile, level, namespace_, name_='IntermediarioServico', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarNfseEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4900,7 +5536,8 @@ class ConsultarNfseEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -4910,7 +5547,7 @@ class ConsultarNfseEnvio(GeneratedsSuper):
         if nodeName_ == 'Prestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_Prestador(obj_)
+            self.Prestador = obj_
         elif nodeName_ == 'NumeroNfse':
             sval_ = child_.text
             try:
@@ -4925,15 +5562,15 @@ class ConsultarNfseEnvio(GeneratedsSuper):
         elif nodeName_ == 'PeriodoEmissao':
             obj_ = PeriodoEmissaoType.factory()
             obj_.build(child_)
-            self.set_PeriodoEmissao(obj_)
+            self.PeriodoEmissao = obj_
         elif nodeName_ == 'Tomador':
             obj_ = tcIdentificacaoTomador.factory()
             obj_.build(child_)
-            self.set_Tomador(obj_)
+            self.Tomador = obj_
         elif nodeName_ == 'IntermediarioServico':
             obj_ = tcIdentificacaoIntermediarioServico.factory()
             obj_.build(child_)
-            self.set_IntermediarioServico(obj_)
+            self.IntermediarioServico = obj_
 # end class ConsultarNfseEnvio
 
 
@@ -4953,36 +5590,45 @@ class ConsultarLoteRpsResposta(GeneratedsSuper):
     def set_ListaNfse(self, ListaNfse): self.ListaNfse = ListaNfse
     def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
     def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='ConsultarLoteRpsResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarLoteRpsResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarLoteRpsResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarLoteRpsResposta', fromsubclass_=False):
-        if self.ListaNfse is not None:
-            self.ListaNfse.export(outfile, level, namespace_, name_='ListaNfse', )
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.ListaNfse is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarLoteRpsResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarLoteRpsResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarLoteRpsResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarLoteRpsResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.ListaNfse is not None:
+            self.ListaNfse.export(outfile, level, namespace_, name_='ListaNfse', pretty_print=pretty_print)
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ConsultarLoteRpsResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -4990,7 +5636,7 @@ class ConsultarLoteRpsResposta(GeneratedsSuper):
     def exportLiteralChildren(self, outfile, level, name_):
         if self.ListaNfse is not None:
             showIndent(outfile, level)
-            outfile.write('ListaNfse=model_.ListaNfseType1(\n')
+            outfile.write('ListaNfse=model_.ListaNfseType4(\n')
             self.ListaNfse.exportLiteral(outfile, level, name_='ListaNfse')
             showIndent(outfile, level)
             outfile.write('),\n')
@@ -5001,7 +5647,8 @@ class ConsultarLoteRpsResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -5009,13 +5656,13 @@ class ConsultarLoteRpsResposta(GeneratedsSuper):
         pass
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'ListaNfse':
-            obj_ = ListaNfseType1.factory()
+            obj_ = ListaNfseType4.factory()
             obj_.build(child_)
-            self.set_ListaNfse(obj_)
+            self.ListaNfse = obj_
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class ConsultarLoteRpsResposta
 
 
@@ -5038,37 +5685,46 @@ class ConsultarLoteRpsEnvio(GeneratedsSuper):
     def validate_tsNumeroProtocolo(self, value):
         # Validate type tsNumeroProtocolo, a restriction on xsd:string.
         pass
-    def export(self, outfile, level, namespace_='', name_='ConsultarLoteRpsEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarLoteRpsEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarLoteRpsEnvio'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarLoteRpsEnvio', fromsubclass_=False):
-        if self.Prestador is not None:
-            self.Prestador.export(outfile, level, namespace_, name_='Prestador', )
-        if self.Protocolo is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sProtocolo>%s</%sProtocolo>\n' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_))
     def hasContent_(self):
         if (
             self.Prestador is not None or
             self.Protocolo is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ConsultarLoteRpsEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ConsultarLoteRpsEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ConsultarLoteRpsEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ConsultarLoteRpsEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Prestador is not None:
+            self.Prestador.export(outfile, level, namespace_, name_='Prestador', pretty_print=pretty_print)
+        if self.Protocolo is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sProtocolo>%s</%sProtocolo>%s' % (namespace_, self.gds_format_string(quote_xml(self.Protocolo).encode(ExternalEncoding), input_name='Protocolo'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='ConsultarLoteRpsEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -5084,7 +5740,8 @@ class ConsultarLoteRpsEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('Protocolo=%s,\n' % quote_python(self.Protocolo).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -5094,7 +5751,7 @@ class ConsultarLoteRpsEnvio(GeneratedsSuper):
         if nodeName_ == 'Prestador':
             obj_ = tcIdentificacaoPrestador.factory()
             obj_.build(child_)
-            self.set_Prestador(obj_)
+            self.Prestador = obj_
         elif nodeName_ == 'Protocolo':
             Protocolo_ = child_.text
             Protocolo_ = self.gds_validate_string(Protocolo_, node, 'Protocolo')
@@ -5119,36 +5776,45 @@ class CancelarNfseResposta(GeneratedsSuper):
     def set_Cancelamento(self, Cancelamento): self.Cancelamento = Cancelamento
     def get_ListaMensagemRetorno(self): return self.ListaMensagemRetorno
     def set_ListaMensagemRetorno(self, ListaMensagemRetorno): self.ListaMensagemRetorno = ListaMensagemRetorno
-    def export(self, outfile, level, namespace_='', name_='CancelarNfseResposta', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CancelarNfseResposta')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CancelarNfseResposta'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='CancelarNfseResposta', fromsubclass_=False):
-        if self.Cancelamento is not None:
-            self.Cancelamento.export(outfile, level, namespace_, name_='Cancelamento', )
-        if self.ListaMensagemRetorno is not None:
-            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', )
     def hasContent_(self):
         if (
             self.Cancelamento is not None or
             self.ListaMensagemRetorno is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='CancelarNfseResposta', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CancelarNfseResposta')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CancelarNfseResposta'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='CancelarNfseResposta', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Cancelamento is not None:
+            self.Cancelamento.export(outfile, level, namespace_, name_='Cancelamento', pretty_print=pretty_print)
+        if self.ListaMensagemRetorno is not None:
+            self.ListaMensagemRetorno.export(outfile, level, namespace_, name_='ListaMensagemRetorno', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='CancelarNfseResposta'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -5167,7 +5833,8 @@ class CancelarNfseResposta(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -5177,11 +5844,11 @@ class CancelarNfseResposta(GeneratedsSuper):
         if nodeName_ == 'Cancelamento':
             obj_ = tcCancelamentoNfse.factory()
             obj_.build(child_)
-            self.set_Cancelamento(obj_)
+            self.Cancelamento = obj_
         elif nodeName_ == 'ListaMensagemRetorno':
             obj_ = ListaMensagemRetorno.factory()
             obj_.build(child_)
-            self.set_ListaMensagemRetorno(obj_)
+            self.ListaMensagemRetorno = obj_
 # end class CancelarNfseResposta
 
 
@@ -5198,33 +5865,42 @@ class CancelarNfseEnvio(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Pedido(self): return self.Pedido
     def set_Pedido(self, Pedido): self.Pedido = Pedido
-    def export(self, outfile, level, namespace_='', name_='CancelarNfseEnvio', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CancelarNfseEnvio')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CancelarNfseEnvio'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='CancelarNfseEnvio', fromsubclass_=False):
-        if self.Pedido is not None:
-            self.Pedido.export(outfile, level, namespace_, name_='Pedido', )
     def hasContent_(self):
         if (
             self.Pedido is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='CancelarNfseEnvio', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CancelarNfseEnvio')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CancelarNfseEnvio'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='CancelarNfseEnvio', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Pedido is not None:
+            self.Pedido.export(outfile, level, namespace_, name_='Pedido', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='CancelarNfseEnvio'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -5237,7 +5913,8 @@ class CancelarNfseEnvio(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -5247,7 +5924,7 @@ class CancelarNfseEnvio(GeneratedsSuper):
         if nodeName_ == 'Pedido':
             obj_ = tcPedidoCancelamento.factory()
             obj_.build(child_)
-            self.set_Pedido(obj_)
+            self.Pedido = obj_
 # end class CancelarNfseEnvio
 
 
@@ -5281,51 +5958,60 @@ class SignatureType(GeneratedsSuper):
     def insert_Object(self, index, value): self.Object[index] = value
     def get_Id(self): return self.Id
     def set_Id(self, Id): self.Id = Id
-    def export(self, outfile, level, namespace_='', name_='SignatureType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignatureType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignatureType'):
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignatureType', fromsubclass_=False):
-        if self.SignedInfo is not None:
-            self.SignedInfo.export(outfile, level, namespace_, name_='SignedInfo', )
-        if self.SignatureValue is not None:
-            self.SignatureValue.export(outfile, level, namespace_, name_='SignatureValue', )
-        if self.KeyInfo is not None:
-            self.KeyInfo.export(outfile, level, namespace_, name_='KeyInfo')
-        for Object_ in self.Object:
-            Object_.export(outfile, level, namespace_, name_='Object')
     def hasContent_(self):
         if (
             self.SignedInfo is not None or
             self.SignatureValue is not None or
             self.KeyInfo is not None or
             self.Object
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SignatureType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignatureType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignatureType'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='SignatureType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.SignedInfo is not None:
+            self.SignedInfo.export(outfile, level, namespace_, name_='SignedInfo', pretty_print=pretty_print)
+        if self.SignatureValue is not None:
+            self.SignatureValue.export(outfile, level, namespace_, name_='SignatureValue', pretty_print=pretty_print)
+        if self.KeyInfo is not None:
+            self.KeyInfo.export(outfile, level, namespace_, name_='KeyInfo', pretty_print=pretty_print)
+        for Object_ in self.Object:
+            Object_.export(outfile, level, namespace_, name_='Object', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SignatureType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.SignedInfo is not None:
             showIndent(outfile, level)
@@ -5358,28 +6044,29 @@ class SignatureType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'SignedInfo':
             obj_ = SignedInfoType.factory()
             obj_.build(child_)
-            self.set_SignedInfo(obj_)
+            self.SignedInfo = obj_
         elif nodeName_ == 'SignatureValue':
             obj_ = SignatureValueType.factory()
             obj_.build(child_)
-            self.set_SignatureValue(obj_)
+            self.SignatureValue = obj_
         elif nodeName_ == 'KeyInfo':
             obj_ = KeyInfoType.factory()
             obj_.build(child_)
-            self.set_KeyInfo(obj_)
+            self.KeyInfo = obj_
         elif nodeName_ == 'Object':
             obj_ = ObjectType.factory()
             obj_.build(child_)
@@ -5403,47 +6090,53 @@ class SignatureValueType(GeneratedsSuper):
     def set_Id(self, Id): self.Id = Id
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='SignatureValueType', namespacedef_=''):
-        showIndent(outfile, level)
+    def hasContent_(self):
+        if (
+            self.valueOf_
+        ):
+            return True
+        else:
+            return False
+    def export(self, outfile, level, namespace_='', name_='SignatureValueType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
         outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
+        already_processed = set()
         self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignatureValueType')
         if self.hasContent_():
             outfile.write('>')
             outfile.write(str(self.valueOf_).encode(ExternalEncoding))
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
         else:
-            outfile.write('/>\n')
+            outfile.write('/>%s' % (eol_, ))
     def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignatureValueType'):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignatureValueType', fromsubclass_=False):
+    def exportChildren(self, outfile, level, namespace_='', name_='SignatureValueType', fromsubclass_=False, pretty_print=True):
         pass
-    def hasContent_(self):
-        if (
-            self.valueOf_
-            ):
-            return True
-        else:
-            return False
     def exportLiteral(self, outfile, level, name_='SignatureValueType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
@@ -5451,7 +6144,7 @@ class SignatureValueType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         pass
@@ -5485,48 +6178,57 @@ class SignedInfoType(GeneratedsSuper):
     def insert_Reference(self, index, value): self.Reference[index] = value
     def get_Id(self): return self.Id
     def set_Id(self, Id): self.Id = Id
-    def export(self, outfile, level, namespace_='', name_='SignedInfoType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignedInfoType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignedInfoType'):
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignedInfoType', fromsubclass_=False):
-        if self.CanonicalizationMethod is not None:
-            self.CanonicalizationMethod.export(outfile, level, namespace_, name_='CanonicalizationMethod', )
-        if self.SignatureMethod is not None:
-            self.SignatureMethod.export(outfile, level, namespace_, name_='SignatureMethod', )
-        for Reference_ in self.Reference:
-            Reference_.export(outfile, level, namespace_, name_='Reference')
     def hasContent_(self):
         if (
             self.CanonicalizationMethod is not None or
             self.SignatureMethod is not None or
             self.Reference
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SignedInfoType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignedInfoType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignedInfoType'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='SignedInfoType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.CanonicalizationMethod is not None:
+            self.CanonicalizationMethod.export(outfile, level, namespace_, name_='CanonicalizationMethod', pretty_print=pretty_print)
+        if self.SignatureMethod is not None:
+            self.SignatureMethod.export(outfile, level, namespace_, name_='SignatureMethod', pretty_print=pretty_print)
+        for Reference_ in self.Reference:
+            Reference_.export(outfile, level, namespace_, name_='Reference', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SignedInfoType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.CanonicalizationMethod is not None:
             showIndent(outfile, level)
@@ -5553,24 +6255,25 @@ class SignedInfoType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'CanonicalizationMethod':
             obj_ = CanonicalizationMethodType.factory()
             obj_.build(child_)
-            self.set_CanonicalizationMethod(obj_)
+            self.CanonicalizationMethod = obj_
         elif nodeName_ == 'SignatureMethod':
             obj_ = SignatureMethodType.factory()
             obj_.build(child_)
-            self.set_SignatureMethod(obj_)
+            self.SignatureMethod = obj_
         elif nodeName_ == 'Reference':
             obj_ = ReferenceType.factory()
             obj_.build(child_)
@@ -5611,46 +6314,51 @@ class CanonicalizationMethodType(GeneratedsSuper):
     def set_Algorithm(self, Algorithm): self.Algorithm = Algorithm
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='CanonicalizationMethodType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CanonicalizationMethodType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CanonicalizationMethodType'):
-        if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
-            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='CanonicalizationMethodType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.anytypeobjs_ or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='CanonicalizationMethodType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='CanonicalizationMethodType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='CanonicalizationMethodType'):
+        if self.Algorithm is not None and 'Algorithm' not in already_processed:
+            already_processed.add('Algorithm')
+            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='CanonicalizationMethodType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='CanonicalizationMethodType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             showIndent(outfile, level)
-            outfile.write('Algorithm = %s,\n' % (self.Algorithm,))
+            outfile.write('Algorithm=%s,\n' % (self.Algorithm,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -5660,7 +6368,8 @@ class CanonicalizationMethodType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -5672,7 +6381,7 @@ class CanonicalizationMethodType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Algorithm', node)
         if value is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             self.Algorithm = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == '':
@@ -5720,9 +6429,6 @@ class SignatureMethodType(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_HMACOutputLength(self): return self.HMACOutputLength
     def set_HMACOutputLength(self, HMACOutputLength): self.HMACOutputLength = HMACOutputLength
-    def validate_HMACOutputLengthType(self, value):
-        # Validate type HMACOutputLengthType, a restriction on integer.
-        pass
     def get_anytypeobjs_(self): return self.anytypeobjs_
     def set_anytypeobjs_(self, anytypeobjs_): self.anytypeobjs_ = anytypeobjs_
     def add_anytypeobjs_(self, value): self.anytypeobjs_.append(value)
@@ -5731,47 +6437,55 @@ class SignatureMethodType(GeneratedsSuper):
     def set_Algorithm(self, Algorithm): self.Algorithm = Algorithm
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='SignatureMethodType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignatureMethodType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignatureMethodType'):
-        if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
-            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignatureMethodType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
+    def validate_HMACOutputLengthType(self, value):
+        # Validate type HMACOutputLengthType, a restriction on integer.
+        pass
     def hasContent_(self):
         if (
             self.HMACOutputLength is not None or
             self.anytypeobjs_ or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SignatureMethodType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignatureMethodType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignatureMethodType'):
+        if self.Algorithm is not None and 'Algorithm' not in already_processed:
+            already_processed.add('Algorithm')
+            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='SignatureMethodType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SignatureMethodType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             showIndent(outfile, level)
-            outfile.write('Algorithm = %s,\n' % (self.Algorithm,))
+            outfile.write('Algorithm=%s,\n' % (self.Algorithm,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -5787,7 +6501,8 @@ class SignatureMethodType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -5799,19 +6514,18 @@ class SignatureMethodType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Algorithm', node)
         if value is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             self.Algorithm = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
-        if nodeName_ == 'HMACOutputLength':
-            obj_ = integer.factory()
-            obj_.build(child_)
-            obj_ = self.mixedclass_(MixedContainer.CategoryComplex,
-                MixedContainer.TypeNone, 'HMACOutputLength', obj_)
+        if nodeName_ == 'HMACOutputLength' and child_.text is not None:
+            sval_ = child_.text
+            try:
+                ival_ = int(sval_)
+            except (TypeError, ValueError), exp:
+                raise_parse_error(child_, 'requires integer: %s' % exp)
+            obj_ = self.mixedclass_(MixedContainer.CategorySimple,
+                MixedContainer.TypeInteger, 'HMACOutputLength', ival_)
             self.content_.append(obj_)
-            if hasattr(self, 'add_HMACOutputLength'):
-                self.add_HMACOutputLength(obj_.value)
-            elif hasattr(self, 'set_HMACOutputLength'):
-                self.set_HMACOutputLength(obj_.value)
         elif nodeName_ == '':
             obj_ = __ANY__.factory()
             obj_.build(child_)
@@ -5819,9 +6533,9 @@ class SignatureMethodType(GeneratedsSuper):
                 MixedContainer.TypeNone, '', obj_)
             self.content_.append(obj_)
             if hasattr(self, 'add_'):
-                self.add_(obj_.value)
+              self.add_(obj_.value)
             elif hasattr(self, 'set_'):
-                self.set_(obj_.value)
+              self.set_(obj_.value)
         if not fromsubclass_ and child_.tail is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
                 MixedContainer.TypeNone, '', child_.tail)
@@ -5857,62 +6571,72 @@ class ReferenceType(GeneratedsSuper):
     def set_Id(self, Id): self.Id = Id
     def get_URI(self): return self.URI
     def set_URI(self, URI): self.URI = URI
-    def export(self, outfile, level, namespace_='', name_='ReferenceType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ReferenceType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ReferenceType'):
-        if self.Type is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
-            outfile.write(' Type=%s' % (quote_attrib(self.Type), ))
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-        if self.URI is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
-            outfile.write(' URI=%s' % (quote_attrib(self.URI), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='ReferenceType', fromsubclass_=False):
-        if self.Transforms is not None:
-            self.Transforms.export(outfile, level, namespace_, name_='Transforms')
-        if self.DigestMethod is not None:
-            self.DigestMethod.export(outfile, level, namespace_, name_='DigestMethod', )
-        if self.DigestValue is not None:
-            self.DigestValue.export(outfile, level, namespace_, name_='DigestValue', )
     def hasContent_(self):
         if (
             self.Transforms is not None or
             self.DigestMethod is not None or
             self.DigestValue is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ReferenceType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ReferenceType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ReferenceType'):
+        if self.Type is not None and 'Type' not in already_processed:
+            already_processed.add('Type')
+            outfile.write(' Type=%s' % (quote_attrib(self.Type), ))
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+        if self.URI is not None and 'URI' not in already_processed:
+            already_processed.add('URI')
+            outfile.write(' URI=%s' % (quote_attrib(self.URI), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='ReferenceType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Transforms is not None:
+            self.Transforms.export(outfile, level, namespace_, name_='Transforms', pretty_print=pretty_print)
+        if self.DigestMethod is not None:
+            self.DigestMethod.export(outfile, level, namespace_, name_='DigestMethod', pretty_print=pretty_print)
+        if self.DigestValue is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDigestValue>%s</%sDigestValue>%s' % (namespace_, self.gds_format_base64(self.DigestValue, input_name='DigestValue'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='ReferenceType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Type is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
+            already_processed.add('Type')
             showIndent(outfile, level)
-            outfile.write('Type = %s,\n' % (self.Type,))
+            outfile.write('Type=%s,\n' % (self.Type,))
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
         if self.URI is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
+            already_processed.add('URI')
             showIndent(outfile, level)
-            outfile.write('URI = %s,\n' % (self.URI,))
+            outfile.write('URI=%s,\n' % (self.URI,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.Transforms is not None:
             showIndent(outfile, level)
@@ -5928,41 +6652,49 @@ class ReferenceType(GeneratedsSuper):
             outfile.write('),\n')
         if self.DigestValue is not None:
             showIndent(outfile, level)
-            outfile.write('DigestValue=model_.DigestValue(\n')
-            self.DigestValue.exportLiteral(outfile, level)
+            outfile.write('DigestValue=model_.xsd_base64Binary(\n')
+            self.DigestValue.exportLiteral(outfile, level, name_='DigestValue')
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Type', node)
         if value is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
+            already_processed.add('Type')
             self.Type = value
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
         value = find_attr_value_('URI', node)
         if value is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
+            already_processed.add('URI')
             self.URI = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Transforms':
             obj_ = TransformsType.factory()
             obj_.build(child_)
-            self.set_Transforms(obj_)
+            self.Transforms = obj_
         elif nodeName_ == 'DigestMethod':
             obj_ = DigestMethodType.factory()
             obj_.build(child_)
-            self.set_DigestMethod(obj_)
+            self.DigestMethod = obj_
         elif nodeName_ == 'DigestValue':
-            obj_ = base64Binary.factory()
-            obj_.build(child_)
-            self.set_DigestValue(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'DigestValue')
+            else:
+                bval_ = None
+            self.DigestValue = bval_
 # end class ReferenceType
 
 
@@ -5984,33 +6716,42 @@ class TransformsType(GeneratedsSuper):
     def set_Transform(self, Transform): self.Transform = Transform
     def add_Transform(self, value): self.Transform.append(value)
     def insert_Transform(self, index, value): self.Transform[index] = value
-    def export(self, outfile, level, namespace_='', name_='TransformsType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='TransformsType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='TransformsType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='TransformsType', fromsubclass_=False):
-        for Transform_ in self.Transform:
-            Transform_.export(outfile, level, namespace_, name_='Transform')
     def hasContent_(self):
         if (
             self.Transform
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='TransformsType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='TransformsType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='TransformsType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='TransformsType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for Transform_ in self.Transform:
+            Transform_.export(outfile, level, namespace_, name_='Transform', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='TransformsType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -6029,7 +6770,8 @@ class TransformsType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -6079,47 +6821,52 @@ class TransformType(GeneratedsSuper):
     def set_Algorithm(self, Algorithm): self.Algorithm = Algorithm
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='TransformType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='TransformType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='TransformType'):
-        if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
-            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='TransformType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.anytypeobjs_ is not None or
             self.XPath or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='TransformType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='TransformType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='TransformType'):
+        if self.Algorithm is not None and 'Algorithm' not in already_processed:
+            already_processed.add('Algorithm')
+            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='TransformType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='TransformType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             showIndent(outfile, level)
-            outfile.write('Algorithm = %s,\n' % (self.Algorithm,))
+            outfile.write('Algorithm=%s,\n' % (self.Algorithm,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -6135,7 +6882,8 @@ class TransformType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -6147,7 +6895,7 @@ class TransformType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Algorithm', node)
         if value is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             self.Algorithm = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == '':
@@ -6205,46 +6953,51 @@ class DigestMethodType(GeneratedsSuper):
     def set_Algorithm(self, Algorithm): self.Algorithm = Algorithm
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='DigestMethodType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='DigestMethodType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='DigestMethodType'):
-        if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
-            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='DigestMethodType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.anytypeobjs_ or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='DigestMethodType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='DigestMethodType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='DigestMethodType'):
+        if self.Algorithm is not None and 'Algorithm' not in already_processed:
+            already_processed.add('Algorithm')
+            outfile.write(' Algorithm=%s' % (quote_attrib(self.Algorithm), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='DigestMethodType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='DigestMethodType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Algorithm is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             showIndent(outfile, level)
-            outfile.write('Algorithm = %s,\n' % (self.Algorithm,))
+            outfile.write('Algorithm=%s,\n' % (self.Algorithm,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -6254,7 +7007,8 @@ class DigestMethodType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -6266,7 +7020,7 @@ class DigestMethodType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Algorithm', node)
         if value is not None and 'Algorithm' not in already_processed:
-            already_processed.append('Algorithm')
+            already_processed.add('Algorithm')
             self.Algorithm = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == '':
@@ -6370,25 +7124,6 @@ class KeyInfoType(GeneratedsSuper):
     def set_Id(self, Id): self.Id = Id
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='KeyInfoType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='KeyInfoType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='KeyInfoType'):
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='KeyInfoType', fromsubclass_=False):
-        if self.X509Data is not None:
-            self.X509Data.export(outfile, level, namespace_, name_='X509Data', )
     def hasContent_(self):
         if (
             self.KeyName or
@@ -6400,22 +7135,47 @@ class KeyInfoType(GeneratedsSuper):
             self.MgmtData or
             self.anytypeobjs_ is not None or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='KeyInfoType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='KeyInfoType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='KeyInfoType'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='KeyInfoType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='KeyInfoType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -6467,7 +7227,8 @@ class KeyInfoType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -6479,7 +7240,7 @@ class KeyInfoType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'KeyName' and child_.text is not None:
@@ -6590,37 +7351,42 @@ class KeyValueType(GeneratedsSuper):
     def set_anytypeobjs_(self, anytypeobjs_): self.anytypeobjs_ = anytypeobjs_
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='KeyValueType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='KeyValueType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='KeyValueType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='KeyValueType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.DSAKeyValue is not None or
             self.RSAKeyValue is not None or
             self.anytypeobjs_ is not None or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='KeyValueType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='KeyValueType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='KeyValueType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='KeyValueType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='KeyValueType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
@@ -6648,7 +7414,8 @@ class KeyValueType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -6667,9 +7434,9 @@ class KeyValueType(GeneratedsSuper):
                 MixedContainer.TypeNone, 'DSAKeyValue', obj_)
             self.content_.append(obj_)
             if hasattr(self, 'add_DSAKeyValue'):
-                self.add_DSAKeyValue(obj_.value)
+              self.add_DSAKeyValue(obj_.value)
             elif hasattr(self, 'set_DSAKeyValue'):
-                self.set_DSAKeyValue(obj_.value)
+              self.set_DSAKeyValue(obj_.value)
         elif nodeName_ == 'RSAKeyValue':
             obj_ = RSAKeyValue.factory()
             obj_.build(child_)
@@ -6677,9 +7444,9 @@ class KeyValueType(GeneratedsSuper):
                 MixedContainer.TypeNone, 'RSAKeyValue', obj_)
             self.content_.append(obj_)
             if hasattr(self, 'add_RSAKeyValue'):
-                self.add_RSAKeyValue(obj_.value)
+              self.add_RSAKeyValue(obj_.value)
             elif hasattr(self, 'set_RSAKeyValue'):
-                self.set_RSAKeyValue(obj_.value)
+              self.set_RSAKeyValue(obj_.value)
         elif nodeName_ == '':
             obj_ = __ANY__.factory()
             obj_.build(child_)
@@ -6687,9 +7454,9 @@ class KeyValueType(GeneratedsSuper):
                 MixedContainer.TypeNone, '', obj_)
             self.content_.append(obj_)
             if hasattr(self, 'add_'):
-                self.add_(obj_.value)
+              self.add_(obj_.value)
             elif hasattr(self, 'set_'):
-                self.set_(obj_.value)
+              self.set_(obj_.value)
         if not fromsubclass_ and child_.tail is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
                 MixedContainer.TypeNone, '', child_.tail)
@@ -6716,49 +7483,58 @@ class RetrievalMethodType(GeneratedsSuper):
     def set_Type(self, Type): self.Type = Type
     def get_URI(self): return self.URI
     def set_URI(self, URI): self.URI = URI
-    def export(self, outfile, level, namespace_='', name_='RetrievalMethodType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='RetrievalMethodType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='RetrievalMethodType'):
-        if self.Type is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
-            outfile.write(' Type=%s' % (quote_attrib(self.Type), ))
-        if self.URI is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
-            outfile.write(' URI=%s' % (quote_attrib(self.URI), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='RetrievalMethodType', fromsubclass_=False):
-        if self.Transforms is not None:
-            self.Transforms.export(outfile, level, namespace_, name_='Transforms')
     def hasContent_(self):
         if (
             self.Transforms is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='RetrievalMethodType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='RetrievalMethodType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='RetrievalMethodType'):
+        if self.Type is not None and 'Type' not in already_processed:
+            already_processed.add('Type')
+            outfile.write(' Type=%s' % (quote_attrib(self.Type), ))
+        if self.URI is not None and 'URI' not in already_processed:
+            already_processed.add('URI')
+            outfile.write(' URI=%s' % (quote_attrib(self.URI), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='RetrievalMethodType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Transforms is not None:
+            self.Transforms.export(outfile, level, namespace_, name_='Transforms', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='RetrievalMethodType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Type is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
+            already_processed.add('Type')
             showIndent(outfile, level)
-            outfile.write('Type = %s,\n' % (self.Type,))
+            outfile.write('Type=%s,\n' % (self.Type,))
         if self.URI is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
+            already_processed.add('URI')
             showIndent(outfile, level)
-            outfile.write('URI = %s,\n' % (self.URI,))
+            outfile.write('URI=%s,\n' % (self.URI,))
     def exportLiteralChildren(self, outfile, level, name_):
         if self.Transforms is not None:
             showIndent(outfile, level)
@@ -6767,24 +7543,25 @@ class RetrievalMethodType(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Type', node)
         if value is not None and 'Type' not in already_processed:
-            already_processed.append('Type')
+            already_processed.add('Type')
             self.Type = value
         value = find_attr_value_('URI', node)
         if value is not None and 'URI' not in already_processed:
-            already_processed.append('URI')
+            already_processed.add('URI')
             self.URI = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Transforms':
             obj_ = TransformsType.factory()
             obj_.build(child_)
-            self.set_Transforms(obj_)
+            self.Transforms = obj_
 # end class RetrievalMethodType
 
 
@@ -6816,37 +7593,6 @@ class X509DataType(GeneratedsSuper):
     def set_X509CRL(self, X509CRL): self.X509CRL = X509CRL
     def get_anytypeobjs_(self): return self.anytypeobjs_
     def set_anytypeobjs_(self, anytypeobjs_): self.anytypeobjs_ = anytypeobjs_
-    def export(self, outfile, level, namespace_='', name_='X509DataType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='X509DataType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='X509DataType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='X509DataType', fromsubclass_=False):
-        if self.X509IssuerSerial is not None:
-            self.X509IssuerSerial.export(outfile, level, namespace_, name_='X509IssuerSerial', )
-        if self.X509SKI is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509SKI>%s</%sX509SKI>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509SKI).encode(ExternalEncoding), input_name='X509SKI'), namespace_))
-        if self.X509SubjectName is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509SubjectName>%s</%sX509SubjectName>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509SubjectName).encode(ExternalEncoding), input_name='X509SubjectName'), namespace_))
-        if self.X509Certificate is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509Certificate>%s</%sX509Certificate>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509Certificate).encode(ExternalEncoding), input_name='X509Certificate'), namespace_))
-        if self.X509CRL is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509CRL>%s</%sX509CRL>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509CRL).encode(ExternalEncoding), input_name='X509CRL'), namespace_))
-        if self.anytypeobjs_ is not None:
-            self.anytypeobjs_.export(outfile, level, namespace_)
     def hasContent_(self):
         if (
             self.X509IssuerSerial is not None or
@@ -6855,13 +7601,53 @@ class X509DataType(GeneratedsSuper):
             self.X509Certificate is not None or
             self.X509CRL is not None or
             self.anytypeobjs_ is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='X509DataType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='X509DataType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='X509DataType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='X509DataType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.X509IssuerSerial is not None:
+            self.X509IssuerSerial.export(outfile, level, namespace_, name_='X509IssuerSerial', pretty_print=pretty_print)
+        if self.X509SKI is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509SKI>%s</%sX509SKI>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509SKI).encode(ExternalEncoding), input_name='X509SKI'), namespace_, eol_))
+        if self.X509SubjectName is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509SubjectName>%s</%sX509SubjectName>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509SubjectName).encode(ExternalEncoding), input_name='X509SubjectName'), namespace_, eol_))
+        if self.X509Certificate is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509Certificate>%s</%sX509Certificate>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509Certificate).encode(ExternalEncoding), input_name='X509Certificate'), namespace_, eol_))
+        if self.X509CRL is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509CRL>%s</%sX509CRL>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509CRL).encode(ExternalEncoding), input_name='X509CRL'), namespace_, eol_))
+        if self.anytypeobjs_ is not None:
+            self.anytypeobjs_.export(outfile, level, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='X509DataType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -6892,7 +7678,8 @@ class X509DataType(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -6902,7 +7689,7 @@ class X509DataType(GeneratedsSuper):
         if nodeName_ == 'X509IssuerSerial':
             obj_ = X509IssuerSerialType.factory()
             obj_.build(child_)
-            self.set_X509IssuerSerial(obj_)
+            self.X509IssuerSerial = obj_
         elif nodeName_ == 'X509SKI':
             X509SKI_ = child_.text
             X509SKI_ = self.gds_validate_string(X509SKI_, node, 'X509SKI')
@@ -6942,38 +7729,47 @@ class X509IssuerSerialType(GeneratedsSuper):
     def set_X509IssuerName(self, X509IssuerName): self.X509IssuerName = X509IssuerName
     def get_X509SerialNumber(self): return self.X509SerialNumber
     def set_X509SerialNumber(self, X509SerialNumber): self.X509SerialNumber = X509SerialNumber
-    def export(self, outfile, level, namespace_='', name_='X509IssuerSerialType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='X509IssuerSerialType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='X509IssuerSerialType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='X509IssuerSerialType', fromsubclass_=False):
-        if self.X509IssuerName is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509IssuerName>%s</%sX509IssuerName>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509IssuerName).encode(ExternalEncoding), input_name='X509IssuerName'), namespace_))
-        if self.X509SerialNumber is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sX509SerialNumber>%s</%sX509SerialNumber>\n' % (namespace_, self.gds_format_string(quote_xml(self.X509SerialNumber).encode(ExternalEncoding), input_name='X509SerialNumber'), namespace_))
     def hasContent_(self):
         if (
             self.X509IssuerName is not None or
             self.X509SerialNumber is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='X509IssuerSerialType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='X509IssuerSerialType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='X509IssuerSerialType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='X509IssuerSerialType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.X509IssuerName is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509IssuerName>%s</%sX509IssuerName>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509IssuerName).encode(ExternalEncoding), input_name='X509IssuerName'), namespace_, eol_))
+        if self.X509SerialNumber is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sX509SerialNumber>%s</%sX509SerialNumber>%s' % (namespace_, self.gds_format_string(quote_xml(self.X509SerialNumber).encode(ExternalEncoding), input_name='X509SerialNumber'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='X509IssuerSerialType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -6986,7 +7782,8 @@ class X509IssuerSerialType(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('X509SerialNumber=%s,\n' % quote_python(self.X509SerialNumber).encode(ExternalEncoding))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7039,32 +7836,6 @@ class PGPDataType(GeneratedsSuper):
     def set_anytypeobjs_(self, anytypeobjs_): self.anytypeobjs_ = anytypeobjs_
     def add_anytypeobjs_(self, value): self.anytypeobjs_.append(value)
     def insert_anytypeobjs_(self, index, value): self._anytypeobjs_[index] = value
-    def export(self, outfile, level, namespace_='', name_='PGPDataType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='PGPDataType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='PGPDataType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='PGPDataType', fromsubclass_=False):
-        if self.PGPKeyID is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sPGPKeyID>%s</%sPGPKeyID>\n' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyID).encode(ExternalEncoding), input_name='PGPKeyID'), namespace_))
-        if self.PGPKeyPacket is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sPGPKeyPacket>%s</%sPGPKeyPacket>\n' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyPacket).encode(ExternalEncoding), input_name='PGPKeyPacket'), namespace_))
-        if self.PGPKeyPacket is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sPGPKeyPacket>%s</%sPGPKeyPacket>\n' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyPacket).encode(ExternalEncoding), input_name='PGPKeyPacket'), namespace_))
-        for obj_ in self.anytypeobjs_:
-            obj_.export(outfile, level, namespace_)
     def hasContent_(self):
         if (
             self.PGPKeyID is not None or
@@ -7072,13 +7843,48 @@ class PGPDataType(GeneratedsSuper):
             self.anytypeobjs_ or
             self.PGPKeyPacket is not None or
             self.anytypeobjs_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='PGPDataType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='PGPDataType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='PGPDataType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='PGPDataType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.PGPKeyID is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sPGPKeyID>%s</%sPGPKeyID>%s' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyID).encode(ExternalEncoding), input_name='PGPKeyID'), namespace_, eol_))
+        if self.PGPKeyPacket is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sPGPKeyPacket>%s</%sPGPKeyPacket>%s' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyPacket).encode(ExternalEncoding), input_name='PGPKeyPacket'), namespace_, eol_))
+        if self.PGPKeyPacket is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sPGPKeyPacket>%s</%sPGPKeyPacket>%s' % (namespace_, self.gds_format_string(quote_xml(self.PGPKeyPacket).encode(ExternalEncoding), input_name='PGPKeyPacket'), namespace_, eol_))
+        for obj_ in self.anytypeobjs_:
+            obj_.export(outfile, level, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='PGPDataType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -7110,7 +7916,8 @@ class PGPDataType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7152,37 +7959,46 @@ class SPKIDataType(GeneratedsSuper):
     def set_SPKISexp(self, SPKISexp): self.SPKISexp = SPKISexp
     def get_anytypeobjs_(self): return self.anytypeobjs_
     def set_anytypeobjs_(self, anytypeobjs_): self.anytypeobjs_ = anytypeobjs_
-    def export(self, outfile, level, namespace_='', name_='SPKIDataType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SPKIDataType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SPKIDataType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='SPKIDataType', fromsubclass_=False):
-        if self.SPKISexp is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sSPKISexp>%s</%sSPKISexp>\n' % (namespace_, self.gds_format_string(quote_xml(self.SPKISexp).encode(ExternalEncoding), input_name='SPKISexp'), namespace_))
-        if self.anytypeobjs_ is not None:
-            self.anytypeobjs_.export(outfile, level, namespace_)
     def hasContent_(self):
         if (
             self.SPKISexp is not None or
             self.anytypeobjs_ is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SPKIDataType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SPKIDataType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SPKIDataType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='SPKIDataType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.SPKISexp is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sSPKISexp>%s</%sSPKISexp>%s' % (namespace_, self.gds_format_string(quote_xml(self.SPKISexp).encode(ExternalEncoding), input_name='SPKISexp'), namespace_, eol_))
+        if self.anytypeobjs_ is not None:
+            self.anytypeobjs_.export(outfile, level, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SPKIDataType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -7198,7 +8014,8 @@ class SPKIDataType(GeneratedsSuper):
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7250,60 +8067,65 @@ class ObjectType(GeneratedsSuper):
     def set_Encoding(self, Encoding): self.Encoding = Encoding
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='ObjectType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ObjectType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ObjectType'):
-        if self.MimeType is not None and 'MimeType' not in already_processed:
-            already_processed.append('MimeType')
-            outfile.write(' MimeType=%s' % (quote_attrib(self.MimeType), ))
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-        if self.Encoding is not None and 'Encoding' not in already_processed:
-            already_processed.append('Encoding')
-            outfile.write(' Encoding=%s' % (quote_attrib(self.Encoding), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='ObjectType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.anytypeobjs_ is not None or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ObjectType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ObjectType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ObjectType'):
+        if self.MimeType is not None and 'MimeType' not in already_processed:
+            already_processed.add('MimeType')
+            outfile.write(' MimeType=%s' % (quote_attrib(self.MimeType), ))
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+        if self.Encoding is not None and 'Encoding' not in already_processed:
+            already_processed.add('Encoding')
+            outfile.write(' Encoding=%s' % (quote_attrib(self.Encoding), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='ObjectType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ObjectType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.MimeType is not None and 'MimeType' not in already_processed:
-            already_processed.append('MimeType')
+            already_processed.add('MimeType')
             showIndent(outfile, level)
-            outfile.write('MimeType = %s,\n' % (self.MimeType,))
+            outfile.write('MimeType=%s,\n' % (self.MimeType,))
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
         if self.Encoding is not None and 'Encoding' not in already_processed:
-            already_processed.append('Encoding')
+            already_processed.add('Encoding')
             showIndent(outfile, level)
-            outfile.write('Encoding = %s,\n' % (self.Encoding,))
+            outfile.write('Encoding=%s,\n' % (self.Encoding,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -7313,7 +8135,8 @@ class ObjectType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -7325,15 +8148,15 @@ class ObjectType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('MimeType', node)
         if value is not None and 'MimeType' not in already_processed:
-            already_processed.append('MimeType')
+            already_processed.add('MimeType')
             self.MimeType = value
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
         value = find_attr_value_('Encoding', node)
         if value is not None and 'Encoding' not in already_processed:
-            already_processed.append('Encoding')
+            already_processed.add('Encoding')
             self.Encoding = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == '':
@@ -7374,42 +8197,51 @@ class ManifestType(GeneratedsSuper):
     def insert_Reference(self, index, value): self.Reference[index] = value
     def get_Id(self): return self.Id
     def set_Id(self, Id): self.Id = Id
-    def export(self, outfile, level, namespace_='', name_='ManifestType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ManifestType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ManifestType'):
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='ManifestType', fromsubclass_=False):
-        for Reference_ in self.Reference:
-            Reference_.export(outfile, level, namespace_, name_='Reference')
     def hasContent_(self):
         if (
             self.Reference
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ManifestType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ManifestType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ManifestType'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='ManifestType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for Reference_ in self.Reference:
+            Reference_.export(outfile, level, namespace_, name_='Reference', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ManifestType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('Reference=[\n')
@@ -7424,14 +8256,15 @@ class ManifestType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Reference':
@@ -7462,42 +8295,51 @@ class SignaturePropertiesType(GeneratedsSuper):
     def insert_SignatureProperty(self, index, value): self.SignatureProperty[index] = value
     def get_Id(self): return self.Id
     def set_Id(self, Id): self.Id = Id
-    def export(self, outfile, level, namespace_='', name_='SignaturePropertiesType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignaturePropertiesType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignaturePropertiesType'):
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignaturePropertiesType', fromsubclass_=False):
-        for SignatureProperty_ in self.SignatureProperty:
-            SignatureProperty_.export(outfile, level, namespace_, name_='SignatureProperty')
     def hasContent_(self):
         if (
             self.SignatureProperty
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SignaturePropertiesType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignaturePropertiesType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignaturePropertiesType'):
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='SignaturePropertiesType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for SignatureProperty_ in self.SignatureProperty:
+            SignatureProperty_.export(outfile, level, namespace_, name_='SignatureProperty', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SignaturePropertiesType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('SignatureProperty=[\n')
@@ -7512,14 +8354,15 @@ class SignaturePropertiesType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'SignatureProperty':
@@ -7560,53 +8403,58 @@ class SignaturePropertyType(GeneratedsSuper):
     def set_Id(self, Id): self.Id = Id
     def get_valueOf_(self): return self.valueOf_
     def set_valueOf_(self, valueOf_): self.valueOf_ = valueOf_
-    def export(self, outfile, level, namespace_='', name_='SignaturePropertyType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignaturePropertyType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignaturePropertyType'):
-        if self.Target is not None and 'Target' not in already_processed:
-            already_processed.append('Target')
-            outfile.write(' Target=%s' % (quote_attrib(self.Target), ))
-        if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
-            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
-    def exportChildren(self, outfile, level, namespace_='', name_='SignaturePropertyType', fromsubclass_=False):
-        if not fromsubclass_:
-            for item_ in self.content_:
-                item_.export(outfile, level, item_.name, namespace_)
     def hasContent_(self):
         if (
             self.anytypeobjs_ is not None or
             self.valueOf_
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='SignaturePropertyType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='SignaturePropertyType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='SignaturePropertyType'):
+        if self.Target is not None and 'Target' not in already_processed:
+            already_processed.add('Target')
+            outfile.write(' Target=%s' % (quote_attrib(self.Target), ))
+        if self.Id is not None and 'Id' not in already_processed:
+            already_processed.add('Id')
+            outfile.write(' Id=%s' % (quote_attrib(self.Id), ))
+    def exportChildren(self, outfile, level, namespace_='', name_='SignaturePropertyType', fromsubclass_=False, pretty_print=True):
+        if not fromsubclass_:
+            for item_ in self.content_:
+                item_.export(outfile, level, item_.name, namespace_, pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='SignaturePropertyType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
         showIndent(outfile, level)
         outfile.write('valueOf_ = """%s""",\n' % (self.valueOf_,))
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
         if self.Target is not None and 'Target' not in already_processed:
-            already_processed.append('Target')
+            already_processed.add('Target')
             showIndent(outfile, level)
-            outfile.write('Target = %s,\n' % (self.Target,))
+            outfile.write('Target=%s,\n' % (self.Target,))
         if self.Id is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             showIndent(outfile, level)
-            outfile.write('Id = %s,\n' % (self.Id,))
+            outfile.write('Id=%s,\n' % (self.Id,))
     def exportLiteralChildren(self, outfile, level, name_):
         showIndent(outfile, level)
         outfile.write('content_ = [\n')
@@ -7616,7 +8464,8 @@ class SignaturePropertyType(GeneratedsSuper):
         outfile.write('],\n')
         pass
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         self.valueOf_ = get_all_text_(node)
         if node.text is not None:
             obj_ = self.mixedclass_(MixedContainer.CategoryText,
@@ -7628,11 +8477,11 @@ class SignaturePropertyType(GeneratedsSuper):
     def buildAttributes(self, node, attrs, already_processed):
         value = find_attr_value_('Target', node)
         if value is not None and 'Target' not in already_processed:
-            already_processed.append('Target')
+            already_processed.add('Target')
             self.Target = value
         value = find_attr_value_('Id', node)
         if value is not None and 'Id' not in already_processed:
-            already_processed.append('Id')
+            already_processed.add('Id')
             self.Id = value
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == '':
@@ -7671,9 +8520,6 @@ class DSAKeyValueType(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_P(self): return self.P
     def set_P(self, P): self.P = P
-    def validate_CryptoBinary(self, value):
-        # Validate type CryptoBinary, a restriction on base64Binary.
-        pass
     def get_Q(self): return self.Q
     def set_Q(self, Q): self.Q = Q
     def get_G(self): return self.G
@@ -7686,35 +8532,9 @@ class DSAKeyValueType(GeneratedsSuper):
     def set_Seed(self, Seed): self.Seed = Seed
     def get_PgenCounter(self): return self.PgenCounter
     def set_PgenCounter(self, PgenCounter): self.PgenCounter = PgenCounter
-    def export(self, outfile, level, namespace_='', name_='DSAKeyValueType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='DSAKeyValueType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='DSAKeyValueType'):
+    def validate_CryptoBinary(self, value):
+        # Validate type CryptoBinary, a restriction on base64Binary.
         pass
-    def exportChildren(self, outfile, level, namespace_='', name_='DSAKeyValueType', fromsubclass_=False):
-        if self.P is not None:
-            self.P.export(outfile, level, namespace_, name_='P', )
-        if self.Q is not None:
-            self.Q.export(outfile, level, namespace_, name_='Q', )
-        if self.G is not None:
-            self.G.export(outfile, level, namespace_, name_='G')
-        if self.Y is not None:
-            self.Y.export(outfile, level, namespace_, name_='Y', )
-        if self.J is not None:
-            self.J.export(outfile, level, namespace_, name_='J')
-        if self.Seed is not None:
-            self.Seed.export(outfile, level, namespace_, name_='Seed', )
-        if self.PgenCounter is not None:
-            self.PgenCounter.export(outfile, level, namespace_, name_='PgenCounter', )
     def hasContent_(self):
         if (
             self.P is not None or
@@ -7724,13 +8544,58 @@ class DSAKeyValueType(GeneratedsSuper):
             self.J is not None or
             self.Seed is not None or
             self.PgenCounter is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='DSAKeyValueType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='DSAKeyValueType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='DSAKeyValueType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='DSAKeyValueType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.P is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sP>%s</%sP>%s' % (namespace_, self.gds_format_base64(self.P, input_name='P'), namespace_, eol_))
+        if self.Q is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sQ>%s</%sQ>%s' % (namespace_, self.gds_format_base64(self.Q, input_name='Q'), namespace_, eol_))
+        if self.G is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sG>%s</%sG>%s' % (namespace_, self.gds_format_base64(self.G, input_name='G'), namespace_, eol_))
+        if self.Y is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sY>%s</%sY>%s' % (namespace_, self.gds_format_base64(self.Y, input_name='Y'), namespace_, eol_))
+        if self.J is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sJ>%s</%sJ>%s' % (namespace_, self.gds_format_base64(self.J, input_name='J'), namespace_, eol_))
+        if self.Seed is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sSeed>%s</%sSeed>%s' % (namespace_, self.gds_format_base64(self.Seed, input_name='Seed'), namespace_, eol_))
+        if self.PgenCounter is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sPgenCounter>%s</%sPgenCounter>%s' % (namespace_, self.gds_format_base64(self.PgenCounter, input_name='PgenCounter'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='DSAKeyValueType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -7738,48 +8603,49 @@ class DSAKeyValueType(GeneratedsSuper):
     def exportLiteralChildren(self, outfile, level, name_):
         if self.P is not None:
             showIndent(outfile, level)
-            outfile.write('P=model_.base64Binary(\n')
+            outfile.write('P=model_.xsd_base64Binary(\n')
             self.P.exportLiteral(outfile, level, name_='P')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.Q is not None:
             showIndent(outfile, level)
-            outfile.write('Q=model_.base64Binary(\n')
+            outfile.write('Q=model_.xsd_base64Binary(\n')
             self.Q.exportLiteral(outfile, level, name_='Q')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.G is not None:
             showIndent(outfile, level)
-            outfile.write('G=model_.base64Binary(\n')
+            outfile.write('G=model_.xsd_base64Binary(\n')
             self.G.exportLiteral(outfile, level, name_='G')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.Y is not None:
             showIndent(outfile, level)
-            outfile.write('Y=model_.base64Binary(\n')
+            outfile.write('Y=model_.xsd_base64Binary(\n')
             self.Y.exportLiteral(outfile, level, name_='Y')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.J is not None:
             showIndent(outfile, level)
-            outfile.write('J=model_.base64Binary(\n')
+            outfile.write('J=model_.xsd_base64Binary(\n')
             self.J.exportLiteral(outfile, level, name_='J')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.Seed is not None:
             showIndent(outfile, level)
-            outfile.write('Seed=model_.base64Binary(\n')
+            outfile.write('Seed=model_.xsd_base64Binary(\n')
             self.Seed.exportLiteral(outfile, level, name_='Seed')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.PgenCounter is not None:
             showIndent(outfile, level)
-            outfile.write('PgenCounter=model_.base64Binary(\n')
+            outfile.write('PgenCounter=model_.xsd_base64Binary(\n')
             self.PgenCounter.exportLiteral(outfile, level, name_='PgenCounter')
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7787,32 +8653,88 @@ class DSAKeyValueType(GeneratedsSuper):
         pass
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'P':
-            obj_ = None
-            self.set_P(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'P')
+            else:
+                bval_ = None
+            self.P = bval_
             self.validate_CryptoBinary(self.P)    # validate type CryptoBinary
         elif nodeName_ == 'Q':
-            obj_ = None
-            self.set_Q(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'Q')
+            else:
+                bval_ = None
+            self.Q = bval_
             self.validate_CryptoBinary(self.Q)    # validate type CryptoBinary
         elif nodeName_ == 'G':
-            obj_ = None
-            self.set_G(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'G')
+            else:
+                bval_ = None
+            self.G = bval_
             self.validate_CryptoBinary(self.G)    # validate type CryptoBinary
         elif nodeName_ == 'Y':
-            obj_ = None
-            self.set_Y(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'Y')
+            else:
+                bval_ = None
+            self.Y = bval_
             self.validate_CryptoBinary(self.Y)    # validate type CryptoBinary
         elif nodeName_ == 'J':
-            obj_ = None
-            self.set_J(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'J')
+            else:
+                bval_ = None
+            self.J = bval_
             self.validate_CryptoBinary(self.J)    # validate type CryptoBinary
         elif nodeName_ == 'Seed':
-            obj_ = None
-            self.set_Seed(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'Seed')
+            else:
+                bval_ = None
+            self.Seed = bval_
             self.validate_CryptoBinary(self.Seed)    # validate type CryptoBinary
         elif nodeName_ == 'PgenCounter':
-            obj_ = None
-            self.set_PgenCounter(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'PgenCounter')
+            else:
+                bval_ = None
+            self.PgenCounter = bval_
             self.validate_CryptoBinary(self.PgenCounter)    # validate type CryptoBinary
 # end class DSAKeyValueType
 
@@ -7831,41 +8753,52 @@ class RSAKeyValueType(GeneratedsSuper):
     factory = staticmethod(factory)
     def get_Modulus(self): return self.Modulus
     def set_Modulus(self, Modulus): self.Modulus = Modulus
+    def get_Exponent(self): return self.Exponent
+    def set_Exponent(self, Exponent): self.Exponent = Exponent
     def validate_CryptoBinary(self, value):
         # Validate type CryptoBinary, a restriction on base64Binary.
         pass
-    def get_Exponent(self): return self.Exponent
-    def set_Exponent(self, Exponent): self.Exponent = Exponent
-    def export(self, outfile, level, namespace_='', name_='RSAKeyValueType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='RSAKeyValueType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='RSAKeyValueType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='RSAKeyValueType', fromsubclass_=False):
-        if self.Modulus is not None:
-            self.Modulus.export(outfile, level, namespace_, name_='Modulus', )
-        if self.Exponent is not None:
-            self.Exponent.export(outfile, level, namespace_, name_='Exponent', )
     def hasContent_(self):
         if (
             self.Modulus is not None or
             self.Exponent is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='RSAKeyValueType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='RSAKeyValueType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='RSAKeyValueType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='RSAKeyValueType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.Modulus is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sModulus>%s</%sModulus>%s' % (namespace_, self.gds_format_base64(self.Modulus, input_name='Modulus'), namespace_, eol_))
+        if self.Exponent is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sExponent>%s</%sExponent>%s' % (namespace_, self.gds_format_base64(self.Exponent, input_name='Exponent'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='RSAKeyValueType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -7873,18 +8806,19 @@ class RSAKeyValueType(GeneratedsSuper):
     def exportLiteralChildren(self, outfile, level, name_):
         if self.Modulus is not None:
             showIndent(outfile, level)
-            outfile.write('Modulus=model_.base64Binary(\n')
+            outfile.write('Modulus=model_.xsd_base64Binary(\n')
             self.Modulus.exportLiteral(outfile, level, name_='Modulus')
             showIndent(outfile, level)
             outfile.write('),\n')
         if self.Exponent is not None:
             showIndent(outfile, level)
-            outfile.write('Exponent=model_.base64Binary(\n')
+            outfile.write('Exponent=model_.xsd_base64Binary(\n')
             self.Exponent.exportLiteral(outfile, level, name_='Exponent')
             showIndent(outfile, level)
             outfile.write('),\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7892,12 +8826,28 @@ class RSAKeyValueType(GeneratedsSuper):
         pass
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'Modulus':
-            obj_ = None
-            self.set_Modulus(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'Modulus')
+            else:
+                bval_ = None
+            self.Modulus = bval_
             self.validate_CryptoBinary(self.Modulus)    # validate type CryptoBinary
         elif nodeName_ == 'Exponent':
-            obj_ = None
-            self.set_Exponent(obj_)
+            sval_ = child_.text
+            if sval_ is not None:
+                try:
+                    bval_ = base64.b64decode(sval_)
+                except (TypeError, ValueError), exp:
+                    raise_parse_error(child_, 'requires base64 encoded string: %s' % exp)
+                bval_ = self.gds_validate_base64(bval_, node, 'Exponent')
+            else:
+                bval_ = None
+            self.Exponent = bval_
             self.validate_CryptoBinary(self.Exponent)    # validate type CryptoBinary
 # end class RSAKeyValueType
 
@@ -7920,33 +8870,42 @@ class ListaRpsType(GeneratedsSuper):
     def set_Rps(self, Rps): self.Rps = Rps
     def add_Rps(self, value): self.Rps.append(value)
     def insert_Rps(self, index, value): self.Rps[index] = value
-    def export(self, outfile, level, namespace_='', name_='ListaRpsType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaRpsType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaRpsType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ListaRpsType', fromsubclass_=False):
-        for Rps_ in self.Rps:
-            Rps_.export(outfile, level, namespace_, name_='Rps')
     def hasContent_(self):
         if (
             self.Rps
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ListaRpsType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaRpsType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaRpsType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ListaRpsType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for Rps_ in self.Rps:
+            Rps_.export(outfile, level, namespace_, name_='Rps', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ListaRpsType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -7965,7 +8924,8 @@ class ListaRpsType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -7997,33 +8957,42 @@ class ListaNfseType(GeneratedsSuper):
     def set_CompNfse(self, CompNfse): self.CompNfse = CompNfse
     def add_CompNfse(self, value): self.CompNfse.append(value)
     def insert_CompNfse(self, index, value): self.CompNfse[index] = value
-    def export(self, outfile, level, namespace_='', name_='ListaNfseType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaNfseType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaNfseType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ListaNfseType', fromsubclass_=False):
-        for CompNfse_ in self.CompNfse:
-            CompNfse_.export(outfile, level, namespace_, name_='CompNfse')
     def hasContent_(self):
         if (
             self.CompNfse
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='ListaNfseType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaNfseType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaNfseType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ListaNfseType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for CompNfse_ in self.CompNfse:
+            CompNfse_.export(outfile, level, namespace_, name_='CompNfse', pretty_print=pretty_print)
     def exportLiteral(self, outfile, level, name_='ListaNfseType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -8042,7 +9011,8 @@ class ListaNfseType(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -8060,8 +9030,16 @@ class PeriodoEmissaoType(GeneratedsSuper):
     subclass = None
     superclass = None
     def __init__(self, DataInicial=None, DataFinal=None):
-        self.DataInicial = DataInicial
-        self.DataFinal = DataFinal
+        if isinstance(DataInicial, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataInicial, '%Y-%m-%d').date()
+        else:
+            initvalue_ = DataInicial
+        self.DataInicial = initvalue_
+        if isinstance(DataFinal, basestring):
+            initvalue_ = datetime_.datetime.strptime(DataFinal, '%Y-%m-%d').date()
+        else:
+            initvalue_ = DataFinal
+        self.DataFinal = initvalue_
     def factory(*args_, **kwargs_):
         if PeriodoEmissaoType.subclass:
             return PeriodoEmissaoType.subclass(*args_, **kwargs_)
@@ -8072,38 +9050,47 @@ class PeriodoEmissaoType(GeneratedsSuper):
     def set_DataInicial(self, DataInicial): self.DataInicial = DataInicial
     def get_DataFinal(self): return self.DataFinal
     def set_DataFinal(self, DataFinal): self.DataFinal = DataFinal
-    def export(self, outfile, level, namespace_='', name_='PeriodoEmissaoType', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='PeriodoEmissaoType')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='PeriodoEmissaoType'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='PeriodoEmissaoType', fromsubclass_=False):
-        if self.DataInicial is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataInicial>%s</%sDataInicial>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataInicial).encode(ExternalEncoding), input_name='DataInicial'), namespace_))
-        if self.DataFinal is not None:
-            showIndent(outfile, level)
-            outfile.write('<%sDataFinal>%s</%sDataFinal>\n' % (namespace_, self.gds_format_string(quote_xml(self.DataFinal).encode(ExternalEncoding), input_name='DataFinal'), namespace_))
     def hasContent_(self):
         if (
             self.DataInicial is not None or
             self.DataFinal is not None
-            ):
+        ):
             return True
         else:
             return False
+    def export(self, outfile, level, namespace_='', name_='PeriodoEmissaoType', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='PeriodoEmissaoType')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='PeriodoEmissaoType'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='PeriodoEmissaoType', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        if self.DataInicial is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataInicial>%s</%sDataInicial>%s' % (namespace_, self.gds_format_date(self.DataInicial, input_name='DataInicial'), namespace_, eol_))
+        if self.DataFinal is not None:
+            showIndent(outfile, level, pretty_print)
+            outfile.write('<%sDataFinal>%s</%sDataFinal>%s' % (namespace_, self.gds_format_date(self.DataFinal, input_name='DataFinal'), namespace_, eol_))
     def exportLiteral(self, outfile, level, name_='PeriodoEmissaoType'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -8111,12 +9098,13 @@ class PeriodoEmissaoType(GeneratedsSuper):
     def exportLiteralChildren(self, outfile, level, name_):
         if self.DataInicial is not None:
             showIndent(outfile, level)
-            outfile.write('DataInicial=%s,\n' % quote_python(self.DataInicial).encode(ExternalEncoding))
+            outfile.write('DataInicial=model_.GeneratedsSuper.gds_parse_date("%s"),\n' % self.gds_format_date(self.DataInicial, input_name='DataInicial'))
         if self.DataFinal is not None:
             showIndent(outfile, level)
-            outfile.write('DataFinal=%s,\n' % quote_python(self.DataFinal).encode(ExternalEncoding))
+            outfile.write('DataFinal=model_.GeneratedsSuper.gds_parse_date("%s"),\n' % self.gds_format_date(self.DataFinal, input_name='DataFinal'))
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -8124,17 +9112,17 @@ class PeriodoEmissaoType(GeneratedsSuper):
         pass
     def buildChildren(self, child_, node, nodeName_, fromsubclass_=False):
         if nodeName_ == 'DataInicial':
-            DataInicial_ = child_.text
-            DataInicial_ = self.gds_validate_string(DataInicial_, node, 'DataInicial')
-            self.DataInicial = DataInicial_
+            sval_ = child_.text
+            dval_ = self.gds_parse_date(sval_)
+            self.DataInicial = dval_
         elif nodeName_ == 'DataFinal':
-            DataFinal_ = child_.text
-            DataFinal_ = self.gds_validate_string(DataFinal_, node, 'DataFinal')
-            self.DataFinal = DataFinal_
+            sval_ = child_.text
+            dval_ = self.gds_parse_date(sval_)
+            self.DataFinal = dval_
 # end class PeriodoEmissaoType
 
 
-class ListaNfseType1(GeneratedsSuper):
+class ListaNfseType4(GeneratedsSuper):
     subclass = None
     superclass = None
     def __init__(self, CompNfse=None):
@@ -8143,42 +9131,51 @@ class ListaNfseType1(GeneratedsSuper):
         else:
             self.CompNfse = CompNfse
     def factory(*args_, **kwargs_):
-        if ListaNfseType1.subclass:
-            return ListaNfseType1.subclass(*args_, **kwargs_)
+        if ListaNfseType4.subclass:
+            return ListaNfseType4.subclass(*args_, **kwargs_)
         else:
-            return ListaNfseType1(*args_, **kwargs_)
+            return ListaNfseType4(*args_, **kwargs_)
     factory = staticmethod(factory)
     def get_CompNfse(self): return self.CompNfse
     def set_CompNfse(self, CompNfse): self.CompNfse = CompNfse
     def add_CompNfse(self, value): self.CompNfse.append(value)
     def insert_CompNfse(self, index, value): self.CompNfse[index] = value
-    def export(self, outfile, level, namespace_='', name_='ListaNfseType1', namespacedef_=''):
-        showIndent(outfile, level)
-        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
-        already_processed = []
-        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaNfseType1')
-        if self.hasContent_():
-            outfile.write('>\n')
-            self.exportChildren(outfile, level + 1, namespace_, name_)
-            showIndent(outfile, level)
-            outfile.write('</%s%s>\n' % (namespace_, name_))
-        else:
-            outfile.write('/>\n')
-    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaNfseType1'):
-        pass
-    def exportChildren(self, outfile, level, namespace_='', name_='ListaNfseType1', fromsubclass_=False):
-        for CompNfse_ in self.CompNfse:
-            CompNfse_.export(outfile, level, namespace_, name_='CompNfse')
     def hasContent_(self):
         if (
             self.CompNfse
-            ):
+        ):
             return True
         else:
             return False
-    def exportLiteral(self, outfile, level, name_='ListaNfseType1'):
+    def export(self, outfile, level, namespace_='', name_='ListaNfseType4', namespacedef_='', pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        showIndent(outfile, level, pretty_print)
+        outfile.write('<%s%s%s' % (namespace_, name_, namespacedef_ and ' ' + namespacedef_ or '', ))
+        already_processed = set()
+        self.exportAttributes(outfile, level, already_processed, namespace_, name_='ListaNfseType4')
+        if self.hasContent_():
+            outfile.write('>%s' % (eol_, ))
+            self.exportChildren(outfile, level + 1, namespace_, name_, pretty_print=pretty_print)
+            showIndent(outfile, level, pretty_print)
+            outfile.write('</%s%s>%s' % (namespace_, name_, eol_))
+        else:
+            outfile.write('/>%s' % (eol_, ))
+    def exportAttributes(self, outfile, level, already_processed, namespace_='', name_='ListaNfseType4'):
+        pass
+    def exportChildren(self, outfile, level, namespace_='', name_='ListaNfseType4', fromsubclass_=False, pretty_print=True):
+        if pretty_print:
+            eol_ = '\n'
+        else:
+            eol_ = ''
+        for CompNfse_ in self.CompNfse:
+            CompNfse_.export(outfile, level, namespace_, name_='CompNfse', pretty_print=pretty_print)
+    def exportLiteral(self, outfile, level, name_='ListaNfseType4'):
         level += 1
-        self.exportLiteralAttributes(outfile, level, [], name_)
+        already_processed = set()
+        self.exportLiteralAttributes(outfile, level, already_processed, name_)
         if self.hasContent_():
             self.exportLiteralChildren(outfile, level, name_)
     def exportLiteralAttributes(self, outfile, level, already_processed, name_):
@@ -8197,7 +9194,8 @@ class ListaNfseType1(GeneratedsSuper):
         showIndent(outfile, level)
         outfile.write('],\n')
     def build(self, node):
-        self.buildAttributes(node, node.attrib, [])
+        already_processed = set()
+        self.buildAttributes(node, node.attrib, already_processed)
         for child in node:
             nodeName_ = Tag_pattern_.match(child.tag).groups()[-1]
             self.buildChildren(child, node, nodeName_)
@@ -8208,12 +9206,73 @@ class ListaNfseType1(GeneratedsSuper):
             obj_ = tcCompNfse.factory()
             obj_.build(child_)
             self.CompNfse.append(obj_)
-# end class ListaNfseType1
+# end class ListaNfseType4
+
+
+GDSClassesMapping = {
+    'Confirmacao': tcConfirmacaoCancelamento,
+    'NfseSubstituicao': tcSubstituicaoNfse,
+    'Cancelamento': tcCancelamentoNfse,
+    'Signature': SignatureType,
+    'Servico': tcDadosServico,
+    'Transform': TransformType,
+    'SignatureProperty': SignaturePropertyType,
+    'X509IssuerSerial': X509IssuerSerialType,
+    'SignatureMethod': SignatureMethodType,
+    'TomadorServico': tcDadosTomador,
+    'SPKIData': SPKIDataType,
+    'LoteRps': tcLoteRps,
+    'InfPedidoCancelamento': tcInfPedidoCancelamento,
+    'InfNfse': tcInfNfse,
+    'PeriodoEmissao': PeriodoEmissaoType,
+    'Nfse': tcNfse,
+    'InfRps': tcInfRps,
+    'SubstituicaoNfse': tcInfSubstituicaoNfse,
+    'Prestador': tcIdentificacaoPrestador,
+    'DSAKeyValue': DSAKeyValueType,
+    'MensagemRetorno': tcMensagemRetorno,
+    'X509Data': X509DataType,
+    'DigestMethod': DigestMethodType,
+    'IdentificacaoPrestador': tcIdentificacaoPrestador,
+    'Contato': tcContato,
+    'KeyValue': KeyValueType,
+    'CanonicalizationMethod': CanonicalizationMethodType,
+    'RpsSubstituido': tcIdentificacaoRps,
+    'PGPData': PGPDataType,
+    'SignatureProperties': SignaturePropertiesType,
+    'IdentificacaoTomador': tcIdentificacaoTomador,
+    'SignedInfo': SignedInfoType,
+    'IdentificacaoRps': tcIdentificacaoRps,
+    'Pedido': tcPedidoCancelamento,
+    'KeyInfo': KeyInfoType,
+    'Valores': tcValores,
+    'OrgaoGerador': tcIdentificacaoOrgaoGerador,
+    'PrestadorServico': tcDadosPrestador,
+    'ListaNfse': ListaNfseType4,
+    'Tomador': tcIdentificacaoTomador,
+    'RetrievalMethod': RetrievalMethodType,
+    'Endereco': tcEndereco,
+    'CpfCnpj': tcCpfCnpj,
+    'Manifest': ManifestType,
+    'CompNfse': tcCompNfse,
+    'Rps': tcRps,
+    'Reference': ReferenceType,
+    'RSAKeyValue': RSAKeyValueType,
+    'ListaRps': ListaRpsType,
+    'ConstrucaoCivil': tcDadosConstrucaoCivil,
+    'IdentificacaoNfse': tcIdentificacaoNfse,
+    'IntermediarioServico': tcIdentificacaoIntermediarioServico,
+    'Object': ObjectType,
+    'Transforms': TransformsType,
+    'NfseCancelamento': tcCancelamentoNfse,
+    'SignatureValue': SignatureValueType,
+}
 
 
 USAGE_TEXT = """
 Usage: python <Parser>.py [ -s ] <in_xml_file>
 """
+
 
 def usage():
     print USAGE_TEXT
@@ -8222,11 +9281,13 @@ def usage():
 
 def get_root_tag(node):
     tag = Tag_pattern_.match(node.tag).groups()[-1]
-    rootClass = globals().get(tag)
+    rootClass = GDSClassesMapping.get(tag)
+    if rootClass is None:
+        rootClass = globals().get(tag)
     return tag, rootClass
 
 
-def parse(inFileName):
+def parse(inFileName, silence=False):
     doc = parsexml_(inFileName)
     rootNode = doc.getroot()
     rootTag, rootClass = get_root_tag(rootNode)
@@ -8237,31 +9298,59 @@ def parse(inFileName):
     rootObj.build(rootNode)
     # Enable Python to collect the space used by the DOM.
     doc = None
-    sys.stdout.write('<?xml version="1.0" ?>\n')
-    rootObj.export(sys.stdout, 0, name_=rootTag, 
-        namespacedef_='')
+    if not silence:
+        sys.stdout.write('<?xml version="1.0" ?>\n')
+        rootObj.export(
+            sys.stdout, 0, name_=rootTag,
+            namespacedef_='',
+            pretty_print=True)
     return rootObj
 
 
-def parseString(inString, name_="tcCpfCnpj"):
+def parseEtree(inFileName, silence=False):
+    doc = parsexml_(inFileName)
+    rootNode = doc.getroot()
+    rootTag, rootClass = get_root_tag(rootNode)
+    if rootClass is None:
+        rootTag = 'tcCpfCnpj'
+        rootClass = tcCpfCnpj
+    rootObj = rootClass.factory()
+    rootObj.build(rootNode)
+    # Enable Python to collect the space used by the DOM.
+    doc = None
+    mapping = {}
+    rootElement = rootObj.to_etree(None, name_=rootTag, mapping_=mapping)
+    reverse_mapping = rootObj.gds_reverse_node_mapping(mapping)
+    if not silence:
+        content = etree_.tostring(
+            rootElement, pretty_print=True,
+            xml_declaration=True, encoding="utf-8")
+        sys.stdout.write(content)
+        sys.stdout.write('\n')
+    return rootObj, rootElement, mapping, reverse_mapping
+
+
+def parseString(inString, silence=False):
     from StringIO import StringIO
     doc = parsexml_(StringIO(inString))
     rootNode = doc.getroot()
-    rootTag, rootClass = get_root_tag(rootNode)
+    roots = get_root_tag(rootNode)
+    rootClass = roots[1]
     if rootClass is None:
-        rootTag = 'tcCpfCnpj'
         rootClass = tcCpfCnpj
     rootObj = rootClass.factory()
     rootObj.build(rootNode)
     # Enable Python to collect the space used by the DOM.
     doc = None
-    sys.stdout.write('<?xml version="1.0" ?>\n')
-    rootObj.export(sys.stdout, 0, name_=name_,
-        namespacedef_='')
+    if not silence:
+        sys.stdout.write('<?xml version="1.0" ?>\n')
+        rootObj.export(
+            sys.stdout, 0, name_="tcCpfCnpj",
+            namespacedef_='')
     return rootObj
 
 
-def parseLiteral(inFileName):
+def parseLiteral(inFileName, silence=False):
     doc = parsexml_(inFileName)
     rootNode = doc.getroot()
     rootTag, rootClass = get_root_tag(rootNode)
@@ -8272,11 +9361,12 @@ def parseLiteral(inFileName):
     rootObj.build(rootNode)
     # Enable Python to collect the space used by the DOM.
     doc = None
-    sys.stdout.write('#from nfse_xsd import *\n\n')
-    sys.stdout.write('import nfse_xsd as model_\n\n')
-    sys.stdout.write('rootObj = model_.rootTag(\n')
-    rootObj.exportLiteral(sys.stdout, 0, name_=rootTag)
-    sys.stdout.write(')\n')
+    if not silence:
+        sys.stdout.write('#from tipos_nfse_v01 import *\n\n')
+        sys.stdout.write('import tipos_nfse_v01 as model_\n\n')
+        sys.stdout.write('rootObj = model_.rootTag(\n')
+        rootObj.exportLiteral(sys.stdout, 0, name_=rootTag)
+        sys.stdout.write(')\n')
     return rootObj
 
 
@@ -8289,6 +9379,7 @@ def main():
 
 
 if __name__ == '__main__':
+    #import pdb; pdb.set_trace()
     main()
 
 
@@ -8312,7 +9403,7 @@ __all__ = [
     "KeyValueType",
     "ListaMensagemRetorno",
     "ListaNfseType",
-    "ListaNfseType1",
+    "ListaNfseType4",
     "ListaRpsType",
     "ManifestType",
     "ObjectType",
@@ -8360,4 +9451,4 @@ __all__ = [
     "tcRps",
     "tcSubstituicaoNfse",
     "tcValores"
-    ]
+]

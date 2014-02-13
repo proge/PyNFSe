@@ -73,7 +73,7 @@ class ProcessadorBase(object):
         esquema.assertValid(etree.fromstring(xml))
         return xml
 
-    def _soap_post(self, connection, xml, servico=None):
+    def _soap_post(self, connection, xml, xsd_retorno, servico=None):
         connection.request(u'POST', self.endereco, xml, {
             u'Content-Type': u'application/soap+xml; charset=utf-8',
             u'Content-Length': len(xml),
@@ -153,7 +153,7 @@ class ProcessadorBase(object):
         xml = self._soap(xml, service)
 
         connection = HTTPSConnection(server, key_file=key_file, cert_file=cert_file)
-        result = self._soap_post(connection, xml, service)
+        result = self._soap_post(connection, xml, xsd_retorno, service)
 
         sucesso, erros, alertas = self._parse_result(result)
 

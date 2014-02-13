@@ -55,9 +55,6 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
             caminho,
             )
 
-        self.NS = XSD_RJ
-        self.namespace = 'xmlns="{}" xmlns:xsi="{}"'.format(self.NS, self.NS_SCHEMA)
-
         SIGNATUREKeyInfo = xsd.KeyInfoType(X509Data=xsd.X509DataType(
                 X509Certificate=self._certificado.certificado_txt
                 )
@@ -81,20 +78,20 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
             ValorIr=rps.get('ValorIR'),
             ValorCsll=rps.get('ValorCSLL'),
             IssRetido=rps.get('ISSRetido'),
-            #ValorIss=rps.get(''),
-            #ValorIssRetido=rps.get(''),
-            #OutrasRetencoes=rps.get(''),
-            #BaseCalculo=rps.get(''),
+            ValorIss=rps.get('ValorISS'),
+            ValorIssRetido=rps.get('ValorISSRetido'),
+            #OutrasRetencoes=rps.get('ValorOutrasRetencoes'),#TODO for now we dont support other retained taxes.
+            BaseCalculo=rps.get('ValorBaseCalculo'),
             Aliquota=rps.get('AliquotaServicos'),
-            #ValorLiquidoNfse=rps.get('ValorServicos'),
-            #DescontoIncondicionado=rps.get(''),
-            #DescontoCondicionado=rps.get('')
+            ValorLiquidoNfse=rps.get('ValorLiquido'),
+            #DescontoIncondicionado=rps.get(''), #TODO: for now we dont support this.
+            #DescontoCondicionado=rps.get('')#TODO: for now we dont support this.
             )
             
         _Servico=xsd.tcDadosServico(
             Valores=_Valores,
             ItemListaServico=rps.get('ItemListaServico'),
-            #CodigoCnae=rps.get(''),
+            #CodigoCnae=rps.get(''), #TODO support products in nfse invoice.
             CodigoTributacaoMunicipio=rps.get('CodigoServico'),
             Discriminacao=rps.get('Discriminacao'),
             CodigoMunicipio=int(rps.get('Cidade'))
@@ -161,6 +158,9 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
 
     def enviar_nfse(self, rps, test=False):
         '''Envio de RPS e geração síncrona de NFSe'''
+        self.NS = XSD_RJ
+        self.namespace = 'xmlns="{}" xmlns:xsi="{}"'.format(self.NS, self.NS_SCHEMA)
+
         xml = self._gerar_xml_envio_nfse(rps)
         return self._conectar_servidor(xml, 'GerarNfse', rj.GerarNfseResposta, test)
 
@@ -168,7 +168,12 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
         xml = self._remover_encode(xml)
         curdir = os.getcwd()
         try:
-            xsd_path = os.path.join(os.path.dirname(__file__), 'rj', 'nfse_pcrj_v01.xsd')
+            if xsd == 'GerarNfseEnvio':
+                validation_xsd = os.path.join('rj', 'nfse_pcrj_v01.xsd')
+            else:
+                validation_xsd = 'nfse.xsd'
+
+            xsd_path = os.path.join(os.path.dirname(__file__), validation_xsd)
             esquema = etree.XMLSchema(etree.parse(xsd_path))
         finally:
             os.chdir(curdir)
@@ -186,7 +191,7 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
                 code = message.Codigo
                 try:
                     description = message.Mensagem + ' ' + message.Correcao
-                except AttributeError:
+                except (AttributeError, TypeError):
                     description = message.Mensagem
 
                 if code.startswith('A'):
@@ -194,10 +199,11 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
                 else:
                     dic = errors
 
-                try:
-                    dic[code].append((description))
-                except KeyError:
-                    dic[code] = [(description)]
+                if code != 'E959':
+                    try:
+                        dic[code].append((description))
+                    except KeyError:
+                        dic[code] = [(description)]
 
         except AttributeError:
             success = True
@@ -207,7 +213,7 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
 
         return (success, errors, warnings)
 
-    def _soap_post(self, connection, xml, service):
+    def _soap_post(self, connection, xml, xsd_retorno, service):
         connection.request(u'POST', self.endereco, xml, {
             u'Content-Type': u'text/xml; charset=utf-8',
             u'Content-Length': len(xml),
@@ -229,6 +235,7 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
         resp_xml = ET.fromstring(resp_xml_str)
         for child in resp_xml: body = child
         for child in body: lote_resp = child
+
         result_str = lote_resp.find('{%s}outputXML' % NS_RJ).text
 
         result = rj.parseString(result_str.encode('utf-8'), '%sResposta' % service)
@@ -255,3 +262,43 @@ class ProcessadorNFSeRJ(ProcessadorNFSe):
         print soap_xml
 
         return soap_xml
+
+    def _gerar_xml_cancelar(self, pedido):
+        
+        _IdentificacaoNfse=xsd.tcIdentificacaoNfse(
+            Numero=pedido.get('NumeroNFe'),
+            Cnpj=pedido.get('CPFCNPJRemetente'),
+            InscricaoMunicipal=pedido.get('InscricaoPrestador'),
+            CodigoMunicipio=04557
+            )
+
+        # Código de cancelamento:
+        # 1-Erro na emissão
+        # 2-Serviço não prestado
+        # 3-Duplicidade da nota
+        # 9-Outros
+        codigo_cancelamento = 1
+
+        _InfPedidoCancelamento=xsd.tcInfPedidoCancelamento(
+            IdentificacaoNfse=_IdentificacaoNfse,
+            CodigoCancelamento=codigo_cancelamento
+            )
+       
+        pedido_obj = xsd.tcPedidoCancelamento(
+            InfPedidoCancelamento=_InfPedidoCancelamento,
+            Signature=SIGNATURE
+            )
+
+        return self._obter_xml_da_funcao(
+            xsd.CancelarNfseEnvio(Pedido=pedido_obj),
+            True,
+            xsd='CancelarNfseEnvio'
+            )
+
+    def cancelar_nfse(self, pedido):
+        '''Cancelamento de NFS-e'''
+        self.NS = XSD
+        self.namespace = 'xmlns="{}" xmlns:xsi="{}"'.format(self.NS, self.NS_SCHEMA)
+
+        xml = self._gerar_xml_cancelar(pedido)
+        return self._conectar_servidor(xml, 'CancelarNfse', xsd.CancelarNfseResposta)
